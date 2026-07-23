@@ -296,7 +296,7 @@ export class RoomHost {
       name: record.name,
       persona: record.persona,
       model: config.model ?? DEFAULT_MODEL,
-      tools: config.tools ?? ["read_file", ...FS_TOOL_IDS.filter((t) => t !== "read_file")],
+      tools: config.tools ?? [...FS_TOOL_IDS],
       avatar: config.avatar ?? { emoji: "\u{1F916}", color: "#6ea8fe" },
       memory: config.memory,
     };

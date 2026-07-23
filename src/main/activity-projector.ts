@@ -25,6 +25,7 @@ import type {
   AgentActivityDto,
   ToolCallDto,
   ToolCallStatus,
+  TurnActivityDto,
   TurnOutcomeKind,
 } from "../shared/room-types";
 import type { RoomEventRecord, RoomStore } from "./room-store";
@@ -145,7 +146,7 @@ export class ActivityProjector {
         break;
     }
 
-    if (notify) {
+    if (notify && NOTIFIABLE_KINDS.has(record.kind)) {
       const dto = this.toDto(record.agentId, state);
       for (const listener of this.listeners) {
         listener(record.agentId, dto, record.seq);
@@ -264,7 +265,7 @@ export class ActivityProjector {
     if (!turn) return;
     // Any card still open when the turn settles did not finish cleanly.
     const orphanStatus: ToolCallStatus =
-      outcome === "done" ? "interrupted" : outcome === "cancelled" ? "interrupted" : "error";
+      outcome === "error" || outcome === "failed" ? "error" : "interrupted";
     for (const card of turn.toolCalls) {
       closeIfRunning(card, endedAt, orphanStatus);
     }
@@ -296,10 +297,35 @@ export class ActivityProjector {
       agentId,
       agentName: this.store.getAgent(agentId)?.name ?? agentId,
       lastActiveAt: state.lastActiveAt,
-      current: state.current ? { ...state.current } : null,
-      recent: state.recent.map((turn) => ({ ...turn })),
+      current: state.current ? turnDto(state.current) : null,
+      recent: state.recent.map(turnDto),
     };
   }
+}
+
+
+/** Event kinds that change the rail view; token/status folds update
+ * lastActiveAt only, so they never trigger a push. */
+const NOTIFIABLE_KINDS = new Set([
+  "turn.begin",
+  "tool_call.start",
+  "tool_call.end",
+  "turn.end",
+  "failure",
+]);
+
+/** Deep-enough DTO copy: cards and nested children are copied by value so
+ * later folds never mutate an already-emitted snapshot. */
+function cardDto(card: ToolCallDto): ToolCallDto {
+  return { ...card, children: card.children.map(cardDto) };
+}
+
+function turnDto(turn: MutableTurn): TurnActivityDto {
+  return {
+    ...turn,
+    toolCalls: turn.toolCalls.map(cardDto),
+    produced: turn.produced.map((item) => ({ ...item })),
+  };
 }
 
 function findCard(cards: ToolCallDto[], id: string): ToolCallDto | undefined {
