@@ -302,6 +302,32 @@ export class RoomHost {
     };
   }
 
+  /** Re-register and start every stored agent after an app relaunch. */
+  async restoreAgents(): Promise<void> {
+    const live = new Set(this.sessions.listAgents().map((s) => s.id));
+    const missing = this.store.listAgents().filter((a) => !live.has(a.id));
+    for (const agent of missing) {
+      const config = agent.config as {
+        model?: string;
+        tools?: string[];
+        memory?: AgentConfigInput["memory"];
+      };
+      this.sessions.registerAgent({
+        id: agent.id,
+        name: agent.name,
+        model: config.model,
+        systemPrompt: agent.persona,
+        tools: resolveExtraTools(config.tools ?? []),
+        fsTools: config.tools ? fsToolAllowlist(config.tools) : undefined,
+        memory: config.memory,
+      });
+    }
+    await this.sessions.startAll();
+    if (missing.length > 0) {
+      this.emit({ type: "members", members: this.listMembers() });
+    }
+  }
+
   /** Validate, persist, register, and start a new agent. */
   async createAgent(input: AgentConfigInput): Promise<SaveAgentResult> {
     const errors = validateAgentConfig(input);

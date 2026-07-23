@@ -48,6 +48,8 @@ async function bootstrap(): Promise<void> {
       checkpointsDir: paths.checkpointsDir,
     });
     bindRoomHostPush(roomHost, getMainWindow);
+    // Bring stored agents back online; presence pushes update the UI.
+    void roomHost.restoreAgents();
   }
 
   registerIpcHandlers({
