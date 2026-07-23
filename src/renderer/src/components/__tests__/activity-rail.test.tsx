@@ -7,10 +7,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import type {
   ActivitySnapshot,
   AgentActivityDto,
+  AgentConfigDto,
+  AgentOptionsDto,
   MemberDto,
   RoomClient,
   RoomPushEvent,
   RoomSnapshot,
+  SaveAgentResult,
   ToolCallDto,
   TurnActivityDto,
 } from "../../../../shared/room-types";
@@ -68,6 +71,24 @@ class FakeClient implements RoomClient {
   }
 
   async retryAgent(): Promise<void> {}
+
+  async getAgentOptions(): Promise<AgentOptionsDto> {
+    return { models: [], tools: [], presets: [] };
+  }
+
+  async getAgentConfig(): Promise<AgentConfigDto | null> {
+    return null;
+  }
+
+  async createAgent(): Promise<SaveAgentResult> {
+    return { ok: false, errors: { name: "not implemented" } };
+  }
+
+  async updateAgent(): Promise<SaveAgentResult> {
+    return { ok: false, errors: { name: "not implemented" } };
+  }
+
+  async removeAgent(): Promise<void> {}
 
   subscribe(listener: (event: RoomPushEvent) => void): () => void {
     this.listeners.add(listener);

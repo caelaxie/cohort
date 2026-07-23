@@ -3,6 +3,14 @@
  * Keep this module free of Electron and Node-only imports so the renderer
  * can import the types without pulling main-process code.
  */
+import type {
+  AgentAvatar,
+  AgentConfigInput,
+  AgentPreset,
+  ToolSpec,
+  ValidationErrors,
+} from "./agent-config";
+
 export type AuthorType = "user" | "agent" | "system";
 
 export type PresenceState =
@@ -26,6 +34,8 @@ export interface RoomMessageDto {
   createdAt: number;
   /** True when the turn was cancelled mid-stream and this is the partial. */
   interrupted?: boolean;
+  /** Attribution captured at write time; survives later avatar edits. */
+  avatar?: AgentAvatar;
 }
 
 export interface AgentFailureDto {
@@ -43,6 +53,7 @@ export interface MemberDto {
   /** Short status under the name, e.g. "running search_web…". */
   statusLine: string | null;
   lastFailure: AgentFailureDto | null;
+  avatar?: AgentAvatar;
 }
 
 export interface RoomSnapshot {
@@ -122,6 +133,26 @@ export interface PostMessageResult {
   chainId: string;
 }
 
+// ---------------------------------------------------------------------
+// Agent builder and lifecycle
+// ---------------------------------------------------------------------
+
+/** Catalog + presets the builder renders from. */
+export interface AgentOptionsDto {
+  models: readonly { id: string; label: string }[];
+  tools: readonly ToolSpec[];
+  presets: readonly AgentPreset[];
+}
+
+/** A stored agent's editable config, for the builder's edit mode. */
+export interface AgentConfigDto extends AgentConfigInput {
+  id: string;
+}
+
+export type SaveAgentResult =
+  | { ok: true; member: MemberDto }
+  | { ok: false; errors: ValidationErrors };
+
 /** Renderer-facing room client (IPC in production; fakes in tests). */
 export interface RoomClient {
   getSnapshot(): Promise<RoomSnapshot>;
@@ -129,6 +160,11 @@ export interface RoomClient {
   postMessage(text: string): Promise<PostMessageResult>;
   cancelTurn(agentId: string): Promise<boolean>;
   retryAgent(agentId: string): Promise<void>;
+  getAgentOptions(): Promise<AgentOptionsDto>;
+  getAgentConfig(agentId: string): Promise<AgentConfigDto | null>;
+  createAgent(input: AgentConfigInput): Promise<SaveAgentResult>;
+  updateAgent(agentId: string, input: AgentConfigInput): Promise<SaveAgentResult>;
+  removeAgent(agentId: string): Promise<void>;
   /** Subscribe to live room events. Returns unsubscribe. */
   subscribe(listener: (event: RoomPushEvent) => void): () => void;
 }

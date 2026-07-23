@@ -39,6 +39,7 @@ import type {
   SessionManager,
   TurnOutcome,
 } from "./agents/session-manager";
+import type { AgentAvatar } from "../shared/agent-config";
 import { firstMentionName, resolveMention } from "./mentions";
 import type { RoomAgentRecord, RoomStore } from "./room-store";
 
@@ -123,8 +124,21 @@ export interface BrokerAgentConfig {
   model?: Parameters<SessionManager["registerAgent"]>[0]["model"];
   systemPrompt?: string;
   tools?: Parameters<SessionManager["registerAgent"]>[0]["tools"];
-  /** Extra config persisted verbatim in the store (memory overrides, ...). */
+  /** Filesystem built-in allowlist for the agent's tool set. */
+  fsTools?: Parameters<SessionManager["registerAgent"]>[0]["fsTools"];
+  /** Per-agent memory overrides. */
+  memory?: Parameters<SessionManager["registerAgent"]>[0]["memory"];
+  /** Extra config persisted verbatim in the store (avatar, memory, ...). */
   config?: Record<string, unknown>;
+}
+
+/** Read the avatar out of a stored agent config, if it is well-formed. */
+export function agentAvatar(record: RoomAgentRecord): AgentAvatar | undefined {
+  const avatar = record.config.avatar as AgentAvatar | undefined;
+  if (avatar && typeof avatar.emoji === "string" && typeof avatar.color === "string") {
+    return avatar;
+  }
+  return undefined;
 }
 
 export interface BrokerOptions {
@@ -235,6 +249,8 @@ export class Broker {
       model: config.model,
       systemPrompt: config.systemPrompt ?? config.persona,
       tools: config.tools,
+      fsTools: config.fsTools,
+      memory: config.memory,
     });
     await this.sessions.start(config.id);
   }
@@ -456,6 +472,7 @@ export class Broker {
           authorName: agent.name,
           text: reply,
           interrupted: true,
+          avatar: agentAvatar(agent),
         });
       }
       return;
@@ -479,6 +496,7 @@ export class Broker {
         authorId: agent.id,
         authorName: agent.name,
         text: reply,
+        avatar: agentAvatar(agent),
       });
       if (record.seq === newest + 1) newest = record.seq;
       this.store.setLastDeliveredSeq(agentId, newest);

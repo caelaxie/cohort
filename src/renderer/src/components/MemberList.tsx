@@ -78,6 +78,15 @@ export function MemberList(props: MemberListProps): React.JSX.Element {
                 title={PRESENCE_LABEL[m.presence]}
                 aria-label={PRESENCE_LABEL[m.presence]}
               />
+              {m.avatar ? (
+                <span
+                  className="member-avatar"
+                  style={{ background: m.avatar.color }}
+                  aria-hidden
+                >
+                  {m.avatar.emoji}
+                </span>
+              ) : null}
               <div className="member-info">
                 <div className="member-name">{m.name}</div>
                 <div className="member-status" data-testid={`status-${m.id}`}>

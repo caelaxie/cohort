@@ -16,14 +16,19 @@ import { join } from "node:path";
 import type {
   ActivitySnapshot,
   AgentActivityDto,
+  AgentConfigDto,
   AgentFailureDto,
+  AgentOptionsDto,
   MemberDto,
   PresenceState,
   RoomMessageDto,
   RoomPushEvent,
   RoomSnapshot,
+  SaveAgentResult,
 } from "../shared/room-types";
 import { ActivityProjector } from "./activity-projector";
+import { fsToolAllowlist, resolveExtraTools } from "./agent-config";
+import { createRoomAgent } from "./agents/agent-factory";
 import {
   SessionManager,
   type AgentFailure,
@@ -31,12 +36,27 @@ import {
   type SessionEvent,
   type SessionManagerOptions,
 } from "./agents/session-manager";
-import { Broker, type BrokerOptions, type RelevanceGate } from "./broker";
+import { createRoomWorkspace, type RoomWorkspace } from "./agents/workspace";
+import { agentAvatar, Broker, type BrokerOptions, type RelevanceGate } from "./broker";
 import { RoomStore, type RoomMessage } from "./room-store";
+import {
+  AGENT_PRESETS,
+  DEFAULT_MODEL,
+  FS_TOOL_IDS,
+  MODEL_OPTIONS,
+  TOOL_CATALOG,
+  slugifyAgentId,
+  validateAgentConfig,
+  type AgentConfigInput,
+} from "../shared/agent-config";
 
 export interface RoomHostOptions {
   /** SQLite path for the room store (`:memory:` allowed). */
   roomDbPath: string;
+  /** Shared jailed workspace directory; agents get file tools rooted here. */
+  workspaceDir?: string;
+  /** Directory for per-agent checkpoint DBs (persistent memory). */
+  checkpointsDir?: string;
   /** Optional session-manager overrides (factory, timeouts) for tests. */
   sessionOptions?: SessionManagerOptions;
   /** Optional broker overrides (gate, caps). */
@@ -57,6 +77,7 @@ function toMessageDto(message: RoomMessage): RoomMessageDto {
     text: message.text,
     createdAt: message.createdAt,
     interrupted: message.interrupted || undefined,
+    avatar: message.avatar,
   };
 }
 
@@ -112,6 +133,8 @@ export class RoomHost {
   readonly sessions: SessionManager;
   readonly broker: Broker;
   readonly projector: ActivityProjector;
+  private readonly workspace: RoomWorkspace | null;
+  private readonly checkpointsDir: string | null;
 
   private readonly listeners = new Set<RoomPushListener>();
   private readonly lastToolByAgent = new Map<string, string | null>();
@@ -119,7 +142,28 @@ export class RoomHost {
 
   constructor(options: RoomHostOptions) {
     this.store = new RoomStore(options.roomDbPath);
-    this.sessions = new SessionManager(options.sessionOptions);
+    this.workspace = options.workspaceDir
+      ? createRoomWorkspace(options.workspaceDir)
+      : null;
+    this.checkpointsDir = options.checkpointsDir ?? null;
+
+    // Production factory: jail agents into the shared workspace and give
+    // each its own checkpoint directory. Tests inject their own factory.
+    const sessionOptions: SessionManagerOptions = { ...options.sessionOptions };
+    if (!sessionOptions.factory && (this.workspace || this.checkpointsDir)) {
+      const workspace = this.workspace;
+      const checkpointsDir = this.checkpointsDir;
+      sessionOptions.factory = (config) =>
+        createRoomAgent({
+          ...config,
+          backend: config.backend ?? workspace?.createBackend(),
+          permissions:
+            config.permissions ?? (workspace ? [...workspace.permissions] : undefined),
+          memoryDir: config.memoryDir ?? checkpointsDir ?? undefined,
+        });
+    }
+
+    this.sessions = new SessionManager(sessionOptions);
     this.broker = new Broker({
       store: this.store,
       sessions: this.sessions,
@@ -210,6 +254,7 @@ export class RoomHost {
         presence,
         statusLine: presenceStatusLine(presence, toolName),
         lastFailure: snap?.lastFailure ? toFailureDto(snap.lastFailure) : null,
+        avatar: agentAvatar(agent),
       };
     });
   }
@@ -225,6 +270,115 @@ export class RoomHost {
   async retryAgent(agentId: string): Promise<void> {
     await this.sessions.retryAgent(agentId);
     this.emitMember(agentId);
+  }
+
+  // ------------------------------------------------------------------
+  // Agent lifecycle (create / edit / remove)
+  // ------------------------------------------------------------------
+
+  /** Catalog + presets the builder renders from. */
+  getAgentOptions(): AgentOptionsDto {
+    return { models: MODEL_OPTIONS, tools: TOOL_CATALOG, presets: AGENT_PRESETS };
+  }
+
+  /** A stored agent's editable config, for the builder's edit mode. */
+  getAgentConfig(agentId: string): AgentConfigDto | null {
+    const record = this.store.getAgent(agentId);
+    if (!record) return null;
+    const config = record.config as {
+      model?: string;
+      tools?: string[];
+      avatar?: AgentConfigInput["avatar"];
+      memory?: AgentConfigInput["memory"];
+    };
+    return {
+      id: record.id,
+      name: record.name,
+      persona: record.persona,
+      model: config.model ?? DEFAULT_MODEL,
+      tools: config.tools ?? ["read_file", ...FS_TOOL_IDS.filter((t) => t !== "read_file")],
+      avatar: config.avatar ?? { emoji: "\u{1F916}", color: "#6ea8fe" },
+      memory: config.memory,
+    };
+  }
+
+  /** Validate, persist, register, and start a new agent. */
+  async createAgent(input: AgentConfigInput): Promise<SaveAgentResult> {
+    const errors = validateAgentConfig(input);
+    if (Object.keys(errors).length > 0) return { ok: false, errors };
+    const id = slugifyAgentId(input.name, (candidate) => this.store.getAgent(candidate) !== null);
+    await this.broker.addAgent({
+      id,
+      name: input.name.trim(),
+      persona: input.persona.trim(),
+      model: input.model,
+      tools: resolveExtraTools(input.tools),
+      fsTools: fsToolAllowlist(input.tools),
+      memory: input.memory,
+      config: this.storedConfig(input),
+    });
+    this.emitMember(id);
+    const member = this.listMembers().find((m) => m.id === id);
+    return member ? { ok: true, member } : { ok: false, errors: { name: "Agent failed to start." } };
+  }
+
+  /**
+   * Validate and apply an edit. A mid-flight turn finishes on the old
+   * config; the next turn uses the new one. Name/avatar changes apply to
+   * future messages — history keeps its original attribution.
+   */
+  async updateAgent(agentId: string, input: AgentConfigInput): Promise<SaveAgentResult> {
+    if (!this.store.getAgent(agentId)) {
+      return { ok: false, errors: { name: `Unknown agent: ${agentId}` } };
+    }
+    const errors = validateAgentConfig(input);
+    if (Object.keys(errors).length > 0) return { ok: false, errors };
+    this.store.updateAgent(agentId, {
+      name: input.name.trim(),
+      persona: input.persona.trim(),
+      config: this.storedConfig(input),
+    });
+    this.sessions.reconfigure(agentId, {
+      name: input.name.trim(),
+      systemPrompt: input.persona.trim(),
+      model: input.model,
+      tools: resolveExtraTools(input.tools),
+      fsTools: fsToolAllowlist(input.tools),
+      memory: input.memory,
+    });
+    this.emitMember(agentId);
+    const member = this.listMembers().find((m) => m.id === agentId);
+    return member ? { ok: true, member } : { ok: false, errors: { name: "Agent update failed." } };
+  }
+
+  /**
+   * Cancel any in-flight turn, stop and unregister the agent, and drop it
+   * from the roster. Its messages stay in history and its checkpoint file
+   * stays on disk.
+   */
+  async removeAgent(agentId: string): Promise<void> {
+    const agent = this.store.getAgent(agentId);
+    if (!agent) return;
+    this.broker.cancelTurn(agentId);
+    await this.sessions.stopAgent(agentId);
+    this.store.deleteAgent(agentId);
+    this.store.appendMessage({
+      authorType: "system",
+      authorId: "system",
+      authorName: "Room",
+      text: `${agent.name} was removed from the room. Their messages stay in the history.`,
+    });
+    this.emit({ type: "members", members: this.listMembers() });
+  }
+
+  /** Fields persisted verbatim on the agent record. */
+  private storedConfig(input: AgentConfigInput): Record<string, unknown> {
+    return {
+      model: input.model,
+      tools: input.tools,
+      avatar: input.avatar,
+      memory: input.memory ?? {},
+    };
   }
 
   private handleSessionEvent(event: SessionEvent): void {

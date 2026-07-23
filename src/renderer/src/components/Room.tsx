@@ -10,12 +10,13 @@ export interface RoomProps {
   onOpenBuilder: () => void;
   onEditAgent?: (agentId: string) => void;
   onRemoveAgent?: (agentId: string) => void;
+  onOpenSettings?: () => void;
   /** Optional rail slot. */
   rail?: React.ReactNode;
 }
 
 export function Room(props: RoomProps): React.JSX.Element {
-  const { client, onOpenBuilder, onEditAgent, onRemoveAgent, rail } = props;
+  const { client, onOpenBuilder, onEditAgent, onRemoveAgent, onOpenSettings, rail } = props;
   const { state, postMessage, cancelTurn, retryAgent } = useRoomState(client);
 
   const hasAgents = state.members.length > 0;
@@ -36,6 +37,16 @@ export function Room(props: RoomProps): React.JSX.Element {
         <header className="room-header">
           <h1>Agent Room</h1>
           {!state.ready ? <span className="room-loading">Loading…</span> : null}
+          {onOpenSettings ? (
+            <button
+              type="button"
+              className="btn-ghost room-settings"
+              data-testid="open-settings"
+              onClick={onOpenSettings}
+            >
+              Settings
+            </button>
+          ) : null}
         </header>
 
         {!hasAgents && state.ready ? (

@@ -42,7 +42,11 @@ async function bootstrap(): Promise<void> {
 
   if (!roomHost) {
     const paths = defaultRoomPaths(app.getPath("userData"));
-    roomHost = new RoomHost({ roomDbPath: paths.roomDbPath });
+    roomHost = new RoomHost({
+      roomDbPath: paths.roomDbPath,
+      workspaceDir: paths.workspaceDir,
+      checkpointsDir: paths.checkpointsDir,
+    });
     bindRoomHostPush(roomHost, getMainWindow);
   }
 

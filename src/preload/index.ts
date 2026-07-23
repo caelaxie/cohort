@@ -1,11 +1,15 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 
+import type { AgentConfigInput } from "../shared/agent-config";
 import type {
   ActivitySnapshot,
+  AgentConfigDto,
+  AgentOptionsDto,
   PostMessageResult,
   RoomClient,
   RoomPushEvent,
   RoomSnapshot,
+  SaveAgentResult,
 } from "../shared/room-types";
 
 const room: RoomClient = {
@@ -18,6 +22,15 @@ const room: RoomClient = {
     ipcRenderer.invoke("room:cancel-turn", agentId),
   retryAgent: (agentId: string): Promise<void> =>
     ipcRenderer.invoke("room:retry-agent", agentId),
+  getAgentOptions: (): Promise<AgentOptionsDto> => ipcRenderer.invoke("agents:get-options"),
+  getAgentConfig: (agentId: string): Promise<AgentConfigDto | null> =>
+    ipcRenderer.invoke("agents:get-config", agentId),
+  createAgent: (input: AgentConfigInput): Promise<SaveAgentResult> =>
+    ipcRenderer.invoke("agents:create", input),
+  updateAgent: (agentId: string, input: AgentConfigInput): Promise<SaveAgentResult> =>
+    ipcRenderer.invoke("agents:update", agentId, input),
+  removeAgent: (agentId: string): Promise<void> =>
+    ipcRenderer.invoke("agents:remove", agentId),
   subscribe: (listener: (event: RoomPushEvent) => void): (() => void) => {
     const handler = (_event: IpcRendererEvent, payload: RoomPushEvent): void => {
       listener(payload);

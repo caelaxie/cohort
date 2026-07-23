@@ -7,11 +7,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   ActivitySnapshot,
+  AgentConfigDto,
+  AgentOptionsDto,
   MemberDto,
   RoomClient,
   RoomMessageDto,
   RoomPushEvent,
   RoomSnapshot,
+  SaveAgentResult,
 } from "../../../../shared/room-types";
 import { Room } from "../Room";
 import { Composer } from "../Composer";
@@ -59,6 +62,24 @@ class FakeClient implements RoomClient {
   async getActivitySnapshot(): Promise<ActivitySnapshot> {
     return { activities: [], highWaterSeq: 0 };
   }
+
+  async getAgentOptions(): Promise<AgentOptionsDto> {
+    return { models: [], tools: [], presets: [] };
+  }
+
+  async getAgentConfig(): Promise<AgentConfigDto | null> {
+    return null;
+  }
+
+  async createAgent(): Promise<SaveAgentResult> {
+    return { ok: false, errors: { name: "not implemented" } };
+  }
+
+  async updateAgent(): Promise<SaveAgentResult> {
+    return { ok: false, errors: { name: "not implemented" } };
+  }
+
+  async removeAgent(): Promise<void> {}
 
   async postMessage(text: string): Promise<{ seq: number; chainId: string }> {
     if (this.failNextPost) {

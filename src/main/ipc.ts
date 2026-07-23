@@ -4,6 +4,7 @@
  */
 import { ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
 
+import type { AgentConfigInput } from "../shared/agent-config";
 import type { RoomHost } from "./room-host";
 import type { SettingsStore } from "./settings";
 
@@ -28,6 +29,11 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   ipcMain.removeHandler("room:cancel-turn");
   ipcMain.removeHandler("room:retry-agent");
   ipcMain.removeHandler("activity:get-snapshot");
+  ipcMain.removeHandler("agents:get-options");
+  ipcMain.removeHandler("agents:get-config");
+  ipcMain.removeHandler("agents:create");
+  ipcMain.removeHandler("agents:update");
+  ipcMain.removeHandler("agents:remove");
 
   ipcMain.handle("settings:get", (_event: IpcMainInvokeEvent, key: string) => {
     return ctx.settings.get(key);
@@ -87,6 +93,40 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     const host = requireHost(ctx);
     return host.getActivitySnapshot();
   });
+
+  ipcMain.handle("agents:get-options", () => {
+    const host = requireHost(ctx);
+    return host.getAgentOptions();
+  });
+
+  ipcMain.handle("agents:get-config", (_event: IpcMainInvokeEvent, agentId: string) => {
+    const host = requireHost(ctx);
+    return host.getAgentConfig(agentId);
+  });
+
+  ipcMain.handle(
+    "agents:create",
+    async (_event: IpcMainInvokeEvent, input: AgentConfigInput) => {
+      const host = requireHost(ctx);
+      return host.createAgent(input);
+    },
+  );
+
+  ipcMain.handle(
+    "agents:update",
+    async (_event: IpcMainInvokeEvent, agentId: string, input: AgentConfigInput) => {
+      const host = requireHost(ctx);
+      return host.updateAgent(agentId, input);
+    },
+  );
+
+  ipcMain.handle(
+    "agents:remove",
+    async (_event: IpcMainInvokeEvent, agentId: string) => {
+      const host = requireHost(ctx);
+      await host.removeAgent(agentId);
+    },
+  );
 }
 
 /** Attach the room host's push stream to the active BrowserWindow. */

@@ -18,6 +18,8 @@
  */
 import Database from "better-sqlite3";
 
+import type { AgentAvatar } from "../shared/agent-config";
+
 export type AuthorType = "user" | "agent" | "system";
 
 export interface RoomMessage {
@@ -30,6 +32,8 @@ export interface RoomMessage {
   createdAt: number;
   /** True when this is a partial agent reply kept after cancellation. */
   interrupted: boolean;
+  /** Attribution captured at write time; survives later avatar edits. */
+  avatar?: AgentAvatar;
 }
 
 export interface RoomAgentRecord {
@@ -57,6 +61,7 @@ export interface AppendMessageInput {
   text: string;
   createdAt?: number;
   interrupted?: boolean;
+  avatar?: AgentAvatar;
 }
 
 export interface AppendEventInput {
@@ -76,6 +81,7 @@ interface MessageRow {
   text: string;
   created_at: number;
   interrupted: number;
+  avatar: string | null;
 }
 
 interface EventRow {
@@ -105,6 +111,7 @@ function toMessage(row: MessageRow): RoomMessage {
     text: row.text,
     createdAt: row.created_at,
     interrupted: Boolean(row.interrupted),
+    avatar: row.avatar ? (JSON.parse(row.avatar) as AgentAvatar) : undefined,
   };
 }
 
@@ -159,7 +166,8 @@ export class RoomStore {
         author_name TEXT NOT NULL,
         text TEXT NOT NULL,
         created_at INTEGER NOT NULL,
-        interrupted INTEGER NOT NULL DEFAULT 0
+        interrupted INTEGER NOT NULL DEFAULT 0,
+        avatar TEXT
       );
       CREATE TABLE IF NOT EXISTS agents (
         id TEXT PRIMARY KEY,
@@ -177,7 +185,7 @@ export class RoomStore {
         created_at INTEGER NOT NULL
       );
     `);
-    // Upgrade older DBs that lack the interrupted column.
+    // Upgrade older DBs that lack newer message columns.
     const cols = this.db.prepare("PRAGMA table_info(messages)").all() as {
       name: string;
     }[];
@@ -185,6 +193,9 @@ export class RoomStore {
       this.db.exec(
         "ALTER TABLE messages ADD COLUMN interrupted INTEGER NOT NULL DEFAULT 0",
       );
+    }
+    if (!cols.some((c) => c.name === "avatar")) {
+      this.db.exec("ALTER TABLE messages ADD COLUMN avatar TEXT");
     }
   }
 
@@ -218,10 +229,11 @@ export class RoomStore {
     const seq = this.nextSeq("messages");
     const createdAt = input.createdAt ?? Date.now();
     const interrupted = input.interrupted ? 1 : 0;
+    const avatar = input.avatar ? JSON.stringify(input.avatar) : null;
     const info = this.db
       .prepare(
-        `INSERT INTO messages (seq, author_type, author_id, author_name, text, created_at, interrupted)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO messages (seq, author_type, author_id, author_name, text, created_at, interrupted, avatar)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         seq,
@@ -231,6 +243,7 @@ export class RoomStore {
         input.text,
         createdAt,
         interrupted,
+        avatar,
       );
     const message: RoomMessage = {
       id: Number(info.lastInsertRowid),
@@ -241,6 +254,7 @@ export class RoomStore {
       text: input.text,
       createdAt,
       interrupted: Boolean(interrupted),
+      avatar: input.avatar,
     };
     for (const listener of this.messageListeners) {
       listener(message);

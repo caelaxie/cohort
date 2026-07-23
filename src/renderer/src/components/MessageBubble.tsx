@@ -37,6 +37,15 @@ export function MessageBubble(props: MessageBubbleProps): React.JSX.Element {
       data-interrupted={message.interrupted ? "true" : undefined}
     >
       <div className="msg-meta">
+        {message.avatar ? (
+          <span
+            className="msg-avatar"
+            style={{ background: message.avatar.color }}
+            aria-hidden
+          >
+            {message.avatar.emoji}
+          </span>
+        ) : null}
         <span className="msg-author">{message.authorName}</span>
         {streaming ? <span className="msg-streaming-dot" aria-label="streaming" /> : null}
         {message.interrupted ? (
