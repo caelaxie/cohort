@@ -193,4 +193,33 @@ describe("RoomHost agent lifecycle", () => {
     // …and stayed silent: no agent reply landed.
     expect(host.store.listMessages().every((m) => m.authorType !== "agent")).toBe(true);
   });
+
+  it("settles the rail turn when a dispatched agent is offline", async () => {
+    const host = new RoomHost({
+      roomDbPath: ":memory:",
+      sessionOptions: {
+        initRetryBackoffMs: 60_000,
+        factory: () => {
+          throw new Error("init exploded");
+        },
+      },
+    });
+    hosts.push(host);
+
+    const created = await host.createAgent(researcher.config);
+    expect(created.ok).toBe(true);
+    await vi.waitFor(() => expect(host.sessions.getPresence("scout")).toBe("offline"));
+
+    await host.postMessage("@Scout are you there?");
+    await host.broker.idle();
+
+    // The turn began but never reached the runner; the rail still settles
+    // instead of showing a stuck open turn.
+    const activity = host
+      .getActivitySnapshot()
+      .activities.find((a) => a.agentId === "scout");
+    expect(activity?.current).toBeNull();
+    expect(activity?.recent.length).toBeGreaterThan(0);
+    expect(activity?.recent[0].outcome).toBe("error");
+  });
 });

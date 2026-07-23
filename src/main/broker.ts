@@ -180,6 +180,10 @@ export class Broker {
   private readonly activeTurnIds = new Map<string, string>();
   /** Deepest depth dispatched per chain — diagnostic for tests and the UI. */
   private readonly chainDepths = new Map<string, number>();
+  /** Unique per broker instance so turn ids never collide across relaunches. */
+  private readonly turnPrefix = `turn-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
   private turnCounter = 0;
   private readonly unsubscribe: () => void;
 
@@ -439,7 +443,7 @@ export class Broker {
     });
     const messages: BaseMessageLike[] = [{ role: "user", content: envelope }];
 
-    const turnId = `turn-${++this.turnCounter}`;
+    const turnId = `${this.turnPrefix}-${++this.turnCounter}`;
     this.activeTurnIds.set(agentId, turnId);
     // Mark the turn boundary for the activity projector: which chat
     // messages spawned this work (cards link back to chat).
@@ -480,6 +484,17 @@ export class Broker {
 
     if (outcome.reason !== "done") {
       // Failed turns leave the watermark alone so the messages replay next.
+      if (outcome.reason === "error") {
+        // A turn that never reached the runner (e.g. agent offline) emits no
+        // turn.end; log one so the activity rail doesn't stay stuck open.
+        // When the runner already ended the turn, this fold is a no-op.
+        this.store.appendEvent({
+          agentId,
+          kind: "turn.end",
+          payload: { kind: "turn.end", reason: "error", error: outcome.error },
+          turnId,
+        });
+      }
       return;
     }
 
