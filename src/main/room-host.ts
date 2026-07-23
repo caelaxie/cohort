@@ -1,10 +1,10 @@
 /**
- * Room host (U6): wires store + session manager + broker into a single
+ * Room host: wires store + session manager + broker into a single
  * main-process façade the IPC layer and (later) quit path can own.
  *
  * Responsibilities:
  * - Build member snapshots with presence + a status line derived from the
- *   latest tool_call (never from tokens — R5).
+ *   latest tool_call (never from tokens).
  * - Push live room events to subscribed renderer windows.
  * - Expose the intents the UI needs: snapshot, post, cancel, retry.
  *
@@ -172,7 +172,7 @@ export class RoomHost {
   }
 
   /**
-   * Roster-complete activity view (U7): every member gets an entry —
+   * Roster-complete activity view: every member gets an entry —
    * agents without folded events get an idle placeholder — and the
    * high-water mark lets a reloaded renderer dedupe live pushes.
    */

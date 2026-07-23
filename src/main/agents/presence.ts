@@ -1,5 +1,5 @@
 /**
- * Presence state machine (U3, R5): the single source of truth for an agent's
+ * Presence state machine: the single source of truth for an agent's
  * member-list/rail presence.
  *
  * States: connecting → idle → thinking → runningTool → error | offline → stopped.
@@ -69,7 +69,7 @@ export const PRESENCE_TRANSITIONS: Record<
   recovered: { error: "idle" },
   // Lifecycle: one auto-restart or a manual retry re-enters connecting.
   restart: { error: "connecting", offline: "connecting" },
-  // Lifecycle: unrecoverable — offline until manual retry (F5).
+  // Lifecycle: unrecoverable — offline until manual retry.
   declaredOffline: {
     connecting: "offline",
     idle: "offline",
@@ -91,7 +91,7 @@ export const PRESENCE_TRANSITIONS: Record<
 /**
  * Map a turn-runner event to presence transitions. `token` events
  * deliberately map to nothing: presence reflects run state, not output
- * volume (R5, HTD presence diagram).
+ * volume.
  */
 export function roomEventTransitions(event: RoomEvent): PresenceTransition[] {
   switch (event.kind) {

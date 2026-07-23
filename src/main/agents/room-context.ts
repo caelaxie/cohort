@@ -1,10 +1,10 @@
 /**
- * Room context (U5; KTD16): ties the broker's room-context envelope into the
+ * Room context: ties the broker's room-context envelope into the
  * invocation path so live turns and replayed messages get identical framing —
  * the member roster and author-attributed "Name: message" lines, with missed
  * messages marked under `MISSED_MARKER`.
  *
- * The envelope builder itself lives in `src/main/broker.ts` (U4); this module
+ * The envelope builder itself lives in `src/main/broker.ts`; this module
  * re-exports it and adds the replay seam: missed messages are injected into an
  * agent's checkpointed history so the agent "sees" what happened while it was
  * away, framed by the same envelope.
@@ -28,7 +28,7 @@ export {
 
 /**
  * Build the invocation input for a turn: the room-context envelope as a
- * single user message. Used for live turns and replay alike (KTD16).
+ * single user message. Used for live turns and replay alike.
  */
 export function buildRoomContextInput(
   input: RoomContextEnvelopeInput,

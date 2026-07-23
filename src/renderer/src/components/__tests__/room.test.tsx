@@ -104,8 +104,8 @@ afterEach(() => {
   cleanup();
 });
 
-describe("Room UI (U6)", () => {
-  it("renders room history in stored order on load (R4)", async () => {
+describe("Room UI", () => {
+  it("renders room history in stored order on load", async () => {
     const client = new FakeClient({
       messages: [
         msg({ seq: 1, text: "first", authorName: "User" }),
@@ -136,7 +136,7 @@ describe("Room UI (U6)", () => {
     expect(screen.getByTestId("msg-3").getAttribute("data-author")).toBe("system");
   });
 
-  it("shows empty state and disables composer when no agents (F1)", async () => {
+  it("shows empty state and disables composer when no agents", async () => {
     const open = vi.fn();
     const client = new FakeClient({ messages: [], members: [] });
     render(<Room client={client} onOpenBuilder={open} />);
@@ -257,7 +257,7 @@ describe("Room UI (U6)", () => {
     expect(input.value).toBe("keep me");
   });
 
-  it("surfaces agent failure with retry and wires stop on busy members (F5)", async () => {
+  it("surfaces agent failure with retry and wires stop on busy members", async () => {
     const client = new FakeClient({
       messages: [
         msg({

@@ -1,9 +1,9 @@
 /**
- * Activity projector (U7; R8, AE4, KTD11): folds the room store's persisted
+ * Activity projector: folds the room store's persisted
  * turn-event log into per-agent activity records for the rail.
  *
- * The store's event log is the projector's persistence (KTD4-style: one
- * source of truth). The constructor folds the full existing log, so a
+ * The store's event log is the projector's persistence — one
+ * source of truth. The constructor folds the full existing log, so a
  * main-process restart or a reloaded renderer catches up from the same
  * records the live path folds — no separate snapshot format, no duplicates.
  *
@@ -14,11 +14,11 @@
  * - `tool_call.start` / `tool_call.end` open and close cards; a call carrying
  *   a subgraph namespace (`ns`) nests one level under the most recent open
  *   top-level card. Durations come from event `createdAt` stamps.
- * - `write_file` / `edit_file` calls contribute produced items (KTD11),
+ * - `write_file` / `edit_file` calls contribute produced items,
  *   deduped by path keeping the latest write.
  * - `turn.end` settles the turn; still-open cards are marked interrupted on
  *   cancellation and errored on failure. `failure` events settle the turn as
- *   failed (F5).
+ *   failed.
  * - Completed turns are retained newest-first, bounded per agent.
  */
 import type {
@@ -32,7 +32,7 @@ import type { RoomEventRecord, RoomStore } from "./room-store";
 /** Default number of completed turns retained per agent. */
 export const DEFAULT_MAX_RECENT_TURNS = 3;
 
-/** File tools whose writes count as produced items (KTD11). */
+/** File tools whose writes count as produced items. */
 const PRODUCING_TOOLS = new Set(["write_file", "edit_file"]);
 
 export interface ActivityProjectorOptions {
@@ -277,7 +277,7 @@ export class ActivityProjector {
     state.current = null;
   }
 
-  /** Events can arrive without a turn.begin (pre-U7 logs); synthesize a shell. */
+  /** Events can arrive without a turn.begin (older logs); synthesize a shell. */
   private ensureTurn(state: AgentState, record: RoomEventRecord): MutableTurn {
     if (!state.current) {
       state.current = {

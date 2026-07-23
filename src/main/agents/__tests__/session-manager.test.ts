@@ -268,7 +268,7 @@ describe("SessionManager", () => {
     expect(manager.activeTimerCount).toBe(0);
   });
 
-  it("hang (turn exceeds wall-clock timeout) → F5 path with failure surfaced", async () => {
+  it("hang (turn exceeds wall-clock timeout) surfaces a failure", async () => {
     const factory = stubFactory([
       [{ tokens: ["slow", "slower"], tokenDelayMs: 200 }],
       [{ tokens: ["ok"] }],
@@ -348,6 +348,111 @@ describe("SessionManager", () => {
     const outcome = await sent;
     expect(outcome.reason).toBe("cancelled");
     expect(manager.getPresence("a")).toBe("idle");
+
+    await manager.shutdown();
+  });
+});
+
+describe("SessionManager lifecycle (reconfigure / stopAgent)", () => {
+  function capturingFactory(scripts: StubReply[][]) {
+    const captured: RoomAgentConfig[] = [];
+    const factory = vi.fn((config: RoomAgentConfig): RoomAgent => {
+      captured.push({ ...config });
+      return createRoomAgent({
+        model: new StubChatModel({
+          script: scripts[captured.length - 1] ?? [{ tokens: ["ok"] }],
+        }),
+        name: config.name,
+        systemPrompt: config.systemPrompt,
+      });
+    });
+    return { captured, factory };
+  }
+
+  function collectTokens(manager: SessionManager): string[] {
+    const tokens: string[] = [];
+    manager.subscribe((e) => {
+      if (e.type === "turn.event" && e.event.kind === "token") {
+        tokens.push(e.event.text);
+      }
+    });
+    return tokens;
+  }
+
+  it("reconfigure mid-turn: current turn finishes old config, next turn uses new", async () => {
+    const { captured, factory } = capturingFactory([
+      [
+        { tokens: ["slow ", "old ", "turn"], tokenDelayMs: 30 },
+        { tokens: ["stale-instance-reply"] },
+      ],
+      [{ tokens: ["new-config-turn"] }],
+    ]);
+    const manager = new SessionManager({ factory, turnTimeoutMs: 10_000 });
+    const tokens = collectTokens(manager);
+    manager.registerAgent({ id: "a", name: "Scout", systemPrompt: "old persona" });
+    await manager.start("a");
+    expect(captured[0].systemPrompt).toBe("old persona");
+
+    const turn1 = manager.sendTurn("a", userMessage);
+    await vi.waitFor(() => expect(manager.getPresence("a")).toBe("thinking"));
+
+    manager.reconfigure("a", {
+      systemPrompt: "new persona",
+      memory: { triggerMessages: 5 },
+    });
+
+    const outcome1 = await turn1;
+    expect(outcome1.reason).toBe("done");
+    expect(tokens.join("")).toContain("slow old turn");
+
+    // The instance is recreated only after the in-flight turn settles.
+    await vi.waitFor(() => expect(factory).toHaveBeenCalledTimes(2));
+    expect(captured[1].systemPrompt).toBe("new persona");
+    expect(captured[1].memory?.triggerMessages).toBe(5);
+
+    const outcome2 = await manager.sendTurn("a", userMessage);
+    expect(outcome2.reason).toBe("done");
+    expect(tokens.join("")).toContain("new-config-turn");
+    expect(tokens.join("")).not.toContain("stale-instance-reply");
+
+    await manager.shutdown();
+  });
+
+  it("reconfigure while idle recreates the instance immediately", async () => {
+    const { captured, factory } = capturingFactory([[{ tokens: ["v1"] }], [{ tokens: ["v2"] }]]);
+    const manager = new SessionManager({ factory, turnTimeoutMs: 10_000 });
+    manager.registerAgent({ id: "a", name: "Scout", systemPrompt: "old persona" });
+    await manager.start("a");
+
+    manager.reconfigure("a", { systemPrompt: "new persona" });
+    await vi.waitFor(() => expect(factory).toHaveBeenCalledTimes(2));
+    expect(captured[1].systemPrompt).toBe("new persona");
+    await vi.waitFor(() => expect(manager.getPresence("a")).toBe("idle"));
+
+    const outcome = await manager.sendTurn("a", userMessage);
+    expect(outcome.reason).toBe("done");
+
+    await manager.shutdown();
+  });
+
+  it("stopAgent cancels the in-flight turn, resolves queued sends, unregisters", async () => {
+    const { factory } = capturingFactory([
+      [{ tokens: ["a", "b", "c", "d", "e", "f"], tokenDelayMs: 40 }],
+    ]);
+    const manager = new SessionManager({ factory, turnTimeoutMs: 10_000 });
+    manager.registerAgent({ id: "a", name: "Scout" });
+    await manager.start("a");
+
+    const active = manager.sendTurn("a", userMessage);
+    await vi.waitFor(() => expect(manager.getPresence("a")).toBe("thinking"));
+    const queued = manager.sendTurn("a", userMessage);
+
+    await manager.stopAgent("a");
+
+    expect((await active).reason).toBe("cancelled");
+    expect((await queued).reason).toBe("cancelled");
+    expect(manager.listAgents()).toHaveLength(0);
+    expect(() => manager.getPresence("a")).toThrow(/unknown agent/);
 
     await manager.shutdown();
   });

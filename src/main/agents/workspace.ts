@@ -1,5 +1,5 @@
 /**
- * Shared room workspace (U5; KTD11, KTD15): one directory every agent's file
+ * Shared room workspace: one directory every agent's file
  * tools are rooted in, so agents can see and build on each other's output.
  *
  * The jail is enforced by the SDK's filesystem backend, not by convention:
@@ -10,7 +10,7 @@
  * typed tool errors (`{ error }` results), so a jailed write fails the tool
  * call without crashing the turn.
  *
- * `permissions` rules (KTD15) layer declarative allow/deny on top of the jail
+ * `permissions` rules layer declarative allow/deny on top of the jail
  * where needed; they are forwarded to `createDeepAgent` verbatim.
  */
 import { mkdirSync } from "node:fs";

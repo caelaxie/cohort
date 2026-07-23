@@ -1,9 +1,9 @@
 /**
- * Turn runner (KTD2, KTD10): executes one agent turn in-process and maps
+ * Turn runner: executes one agent turn in-process and maps
  * LangGraph stream chunks onto the room's `RoomEvent` contract.
  *
  * - Turns are plain in-process invocations; cancellation is an
- *   `AbortSignal` per turn — no wire protocol (KTD2).
+ *   `AbortSignal` per turn — no wire protocol.
  * - Uses the STABLE streaming API only: `agent.stream` with
  *   `streamMode: ["updates", "messages"]` and `subgraphs: true`
  *   (KTD10 — the experimental `streamEvents` v3 API is not used).

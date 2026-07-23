@@ -1,5 +1,5 @@
 /**
- * Stub chat model (KTD12): a deterministic `BaseChatModel` that plays back a
+ * Stub chat model: a deterministic `BaseChatModel` that plays back a
  * script of replies. It makes every downstream behavior — token streaming,
  * chunked tool-call arguments, cancellation, and mid-stream errors — testable
  * without an LLM.

@@ -1,34 +1,34 @@
 /**
- * Invocation broker (U4; R1–R4, R12, R13; F2, F4; KTD4, KTD5, KTD8, KTD16):
+ * Invocation broker:
  * the routing brain that decides who speaks when.
  *
  * Responsibilities:
  * - Appends every user message to the room store (the only history anyone
  *   reads) and routes it: an @mention targets exactly one agent; an
- *   unaddressed message goes through the relevance gate (KTD8) which judges
+ *   unaddressed message goes through the relevance gate which judges
  *   each agent against ITS OWN PERSONA as the rubric. Only opted-in agents
  *   are invoked. The gate is injectable so tests never touch a live model.
- * - Per-agent FIFO with no preemption (KTD5): messages for a busy agent
+ * - Per-agent FIFO with no preemption: messages for a busy agent
  *   accumulate and fold into its NEXT turn input, delivered together and in
  *   order. Built on top of the session manager's per-agent serialization.
- * - Bounded agent→agent chains (KTD5, R12): an agent reply that @mentions
+ * - Bounded agent→agent chains: an agent reply that @mentions
  *   another member may trigger that member, capped at depth 3 per user
  *   message. The budget binds chains regardless of whether the chain began
  *   from a mention turn or a chime-in turn — chime-ins do not reset it.
  *   Hitting the cap writes a subtle system note to the store. An agent reply
  *   @mentioning a NON-EXISTENT member is dropped with a system note and
  *   consumes no budget. Agent replies never go through the chime-in gate —
- *   only user messages and explicit @mentions trigger agents (R12).
+ *   only user messages and explicit @mentions trigger agents.
  * - Replay: each agent has a last-delivered watermark in the store; every
  *   invocation delivers everything since the watermark, with messages that
- *   arrived while the agent was away marked as missed (KTD4).
- * - Every invocation input carries the room-context envelope (KTD16): the
+ *   arrived while the agent was away marked as missed.
+ * - Every invocation input carries the room-context envelope: the
  *   member roster (names + one-line personas) and author-attributed messages,
  *   so agents can tell Scout from Muse from the user.
  * - Cancellation: `cancelTurn` passes through to the session manager and
  *   records the interruption as a first-class system entry in the store.
  *
- * The room-context envelope builder is exported here; U5's
+ * The room-context envelope builder is exported here;
  * `src/main/agents/room-context.ts` reuses this framing for live turns and
  * checkpoint replay alike.
  */
@@ -42,7 +42,7 @@ import type {
 import { firstMentionName, resolveMention } from "./mentions";
 import type { RoomAgentRecord, RoomStore } from "./room-store";
 
-/** Hard caps from KTD5. */
+/** Hard caps on chain depth and room membership. */
 export const MAX_CHAIN_DEPTH = 3;
 export const MAX_AGENTS = 8;
 
@@ -50,7 +50,7 @@ export const MAX_AGENTS = 8;
 export const MISSED_MARKER = "missed while you were away";
 
 // ---------------------------------------------------------------------------
-// Room-context envelope (KTD16)
+// Room-context envelope
 // ---------------------------------------------------------------------------
 
 export interface EnvelopeMessage {
@@ -71,7 +71,7 @@ export interface RoomContextEnvelopeInput {
 
 /**
  * Build the room-context envelope: a roster block plus author-attributed
- * "Name: message" lines. U5 reuses this exact framing for replay.
+ * "Name: message" lines, reused verbatim for checkpoint replay.
  */
 export function buildRoomContext(input: RoomContextEnvelopeInput): string {
   const rosterLines = input.roster.map(
@@ -95,7 +95,7 @@ export function buildRoomContext(input: RoomContextEnvelopeInput): string {
 }
 
 // ---------------------------------------------------------------------------
-// Relevance gate (KTD8)
+// Relevance gate
 // ---------------------------------------------------------------------------
 
 export interface RelevanceGateInput {
@@ -108,7 +108,7 @@ export interface RelevanceGateInput {
 /**
  * Cheap relevance judgment for unaddressed messages. Production wires a fast
  * model prompted with the agent's persona; tests stub it. The DEFAULT gate
- * opts nobody in (restrained by default, R13).
+ * opts nobody in (restrained by default).
  */
 export type RelevanceGate = (input: RelevanceGateInput) => boolean | Promise<boolean>;
 
@@ -179,7 +179,7 @@ export class Broker {
     // Record raw turn events, assemble reply text, and surface failures.
     this.unsubscribe = this.sessions.subscribe((event) => {
       if (event.type === "failure") {
-        // Persist failures too so the activity rail replays them (U7/F5).
+        // Persist failures too so the activity rail replays them.
         this.store.appendEvent({
           agentId: event.agentId,
           kind: "failure",
@@ -209,7 +209,7 @@ export class Broker {
   }
 
   // ------------------------------------------------------------------
-  // Membership (cap: KTD5)
+  // Membership cap
   // ------------------------------------------------------------------
 
   /** Add an agent to the room. Refused once the membership cap is reached. */
@@ -325,7 +325,7 @@ export class Broker {
     return cancelled;
   }
 
-  /** Persist a shutdown interruption marker (KTD7) as a system entry. */
+  /** Persist a shutdown interruption marker as a system entry. */
   recordInterruption(marker: InterruptionMarker): void {
     this.appendSystemNote(
       `Interrupted: ${marker.agentName} was ${marker.interruptedFrom} when the ` +
@@ -346,7 +346,7 @@ export class Broker {
     });
   }
 
-  /** Write a chat-visible failure note (F5); auth gets a distinct surface. */
+  /** Write a chat-visible failure note; auth gets a distinct surface. */
   private surfaceFailure(
     agentId: string,
     failure: { kind: string; message: string; retryable: boolean },
@@ -426,7 +426,7 @@ export class Broker {
     const turnId = `turn-${++this.turnCounter}`;
     this.activeTurnIds.set(agentId, turnId);
     // Mark the turn boundary for the activity projector: which chat
-    // messages spawned this work (U7 — cards link back to chat).
+    // messages spawned this work (cards link back to chat).
     this.store.appendEvent({
       agentId,
       kind: "turn.begin",
@@ -447,7 +447,7 @@ export class Broker {
     this.tokenBuffers.delete(agentId);
 
     if (outcome.reason === "cancelled") {
-      // Keep any partial reply in history with an interrupted marker (U6/F5).
+      // Keep any partial reply in history with an interrupted marker.
       // Watermark stays put so undelivered triggers replay next invocation.
       if (reply.trim()) {
         this.store.appendMessage({

@@ -1,5 +1,5 @@
 /**
- * U5 workspace tests (KTD11, KTD15): one shared room workspace directory,
+ * Workspace tests: one shared room workspace directory,
  * jailed per-agent `FilesystemBackend` instances (`virtualMode: true`), and
  * typed, recoverable denials for escape attempts — exercised both directly
  * and end to end through an agent's `write_file` tool call.
@@ -25,14 +25,14 @@ async function collect(events: AsyncIterable<RoomEvent>): Promise<RoomEvent[]> {
   return out;
 }
 
-describe("shared room workspace (KTD11)", () => {
+describe("shared room workspace", () => {
   it("creates the root directory and shares it across per-agent backends", async () => {
     const root = join(makeTmpDir(), "workspace");
     const workspace = createRoomWorkspace(root);
     expect(workspace.rootDir).toBe(resolve(root));
     expect(existsSync(workspace.rootDir)).toBe(true);
 
-    // Two agents, two backend instances, one directory (KTD11).
+    // Two agents, two backend instances, one directory.
     const scoutFs = workspace.createBackend();
     const museFs = workspace.createBackend();
 
@@ -50,7 +50,7 @@ describe("shared room workspace (KTD11)", () => {
   });
 });
 
-describe("workspace jail (KTD15)", () => {
+describe("workspace jail", () => {
   it("denies `..` traversal with a typed error and writes nothing", async () => {
     const workspace = createRoomWorkspace(join(makeTmpDir(), "workspace"));
     const backend = workspace.createBackend();
@@ -102,7 +102,7 @@ describe("workspace jail (KTD15)", () => {
   });
 });
 
-describe("agent file tools through the jail (KTD15, F2)", () => {
+describe("agent file tools through the jail", () => {
   it("write_file outside the jail fails the tool call, not the turn", async () => {
     const workspace = createRoomWorkspace(join(makeTmpDir(), "workspace"));
     const model = new StubChatModel({
@@ -143,7 +143,7 @@ describe("agent file tools through the jail (KTD15, F2)", () => {
     expect(existsSync(resolve(workspace.rootDir, "..", "escape.txt"))).toBe(
       false,
     );
-    // …and the turn recovered instead of crashing (R8/F5-adjacent).
+    // …and the turn recovered instead of crashing.
     const terminal = events.at(-1);
     expect(terminal).toEqual({ kind: "turn.end", reason: "done" });
   });

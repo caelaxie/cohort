@@ -1,5 +1,5 @@
 /**
- * U5 memory integration tests (KTD6, R9, R10, AE3): persistent per-agent
+ * Memory integration tests: persistent per-agent
  * checkpoints on `SqliteSaver`, stable thread ids, default summarization
  * with per-agent overrides, checkpoint corruption recovery, and missed
  * message replay injection. All model calls go through StubChatModel —
@@ -87,7 +87,7 @@ function makeAgent(
   return createRoomAgent({ id, memoryDir: dir, model, memory, name: id });
 }
 
-describe("persistent memory (AE3)", () => {
+describe("persistent memory", () => {
   it("a recreated agent resumes from the same checkpoint file", async () => {
     const dir = makeTmpDir();
     const first = makeAgent(
@@ -128,7 +128,7 @@ describe("persistent memory (AE3)", () => {
   });
 });
 
-describe("summarization (KTD6, R10)", () => {
+describe("summarization", () => {
   it("forced threshold summarizes old history and keeps recent turns verbatim", async () => {
     const dir = makeTmpDir();
     const model = new RecordingStub({
@@ -177,7 +177,7 @@ describe("summarization (KTD6, R10)", () => {
     expect(history.length).toBeGreaterThan(3); // full record survives
   });
 
-  it("R10 override: summarization disabled keeps full verbatim context", async () => {
+  it("Override: summarization disabled keeps full verbatim context", async () => {
     const dir = makeTmpDir();
     const script: StubReply[] = [
       { tokens: ["a1"] },
@@ -255,7 +255,7 @@ describe("checkpoint validation", () => {
   });
 });
 
-describe("missed-message replay injection (KTD4, KTD16)", () => {
+describe("missed-message replay injection", () => {
   it("updateState injection lands messages in history with no generated reply", async () => {
     const dir = makeTmpDir();
     const model = new RecordingStub({ script: [{ tokens: ["reply"] }] });
@@ -284,7 +284,7 @@ describe("missed-message replay injection (KTD4, KTD16)", () => {
     expect(history).toHaveLength(1); // injected message only — no reply ran
     expect(model.calls).toHaveLength(0); // the model was never invoked
 
-    // Attribution and the missed marker survive replay (KTD16).
+    // Attribution and the missed marker survive replay.
     const content = messageTexts(history)[0];
     expect(content).toContain("[Room roster]");
     expect(content).toContain("- Muse — brainstorms");

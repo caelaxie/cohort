@@ -1,18 +1,18 @@
 /**
  * Agent factory — the seam between Agent Room configuration and the
- * `deepagents` SDK (KTD1: agents are `createDeepAgent` instances living in
+ * `deepagents` SDK (agents are `createDeepAgent` instances living in
  * the Electron main process).
  *
  * The wrapper translates a plain config object into a `DeepAgent` and
  * re-exports the instance type so downstream units (turn runner, room
  * broker) never import `deepagents` directly.
  *
- * Memory (U5; KTD6): when `id` and `memoryDir` are set, the agent gets a
+ * Memory: when `id` and `memoryDir` are set, the agent gets a
  * SQLite checkpointer (`SqliteSaver`, one DB file per agent) and a stable
  * `thread_id` (`roomThreadId`), so a relaunched agent resumes from its
  * checkpointed history. The SDK's default `SummarizationMiddleware` keeps
  * recent messages verbatim and summarizes older ones; `memory` carries the
- * per-agent overrides (R10) — a same-named custom middleware replaces the
+ * per-agent overrides — a same-named custom middleware replaces the
  * default in the SDK's merge, so the override plumbing is the SDK's own.
  */
 import { existsSync, mkdirSync, renameSync } from "node:fs";
@@ -22,15 +22,17 @@ import Database from "better-sqlite3";
 import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
 import {
   createDeepAgent,
+  createFilesystemMiddleware,
   createSummarizationMiddleware,
   StateBackend,
   type BackendRuntime,
   type CreateDeepAgentParams,
   type DeepAgent,
+  type FsToolName,
 } from "deepagents";
 
 /**
- * Per-agent memory overrides (R10). Room-level defaults apply when unset;
+ * Per-agent memory overrides. Room-level defaults apply when unset;
  * these fields tune or disable the default summarization behavior.
  */
 export interface RoomMemoryOverrides {
@@ -60,8 +62,8 @@ export interface RoomMemoryOverrides {
  * - `checkpointer` — explicit persistence override; when omitted and both
  *   `id` and `memoryDir` are set, a `SqliteSaver` is created at
  *   `agentCheckpointPath(memoryDir, id)`.
- * - `permissions` — workspace permission rules (KTD15).
- * - `memory` — per-agent memory overrides (R10).
+ * - `permissions` — workspace permission rules.
+ * - `memory` — per-agent memory overrides.
  * - `name` — agent name surfaced in the graph.
  */
 export interface RoomAgentConfig {
@@ -79,6 +81,8 @@ export interface RoomAgentConfig {
    */
   memoryDir?: string;
   memory?: RoomMemoryOverrides;
+  /** Filesystem built-in allowlist; undefined keeps the SDK default set. */
+  fsTools?: readonly FsToolName[];
   name?: string;
 }
 
@@ -87,7 +91,7 @@ export type RoomAgent = DeepAgent;
 
 type AnyMiddleware = NonNullable<CreateDeepAgentParams["middleware"]>[number];
 
-/** Stable LangGraph thread id for an agent (KTD6: agent id + fixed suffix). */
+/** Stable LangGraph thread id for an agent (agent id + fixed suffix). */
 export function roomThreadId(agentId: string): string {
   return `${agentId}:room`;
 }
@@ -136,7 +140,7 @@ export async function validateAgentCheckpoint(
 
 /**
  * Wrap the agent's invocation methods so every call runs on the agent's
- * stable thread (KTD6). A caller-supplied `thread_id` always wins.
+ * stable thread. A caller-supplied `thread_id` always wins.
  */
 function withStableThread(agent: RoomAgent, threadId: string): RoomAgent {
   const mergeConfig = <T>(config: T): T => {
@@ -155,7 +159,7 @@ function withStableThread(agent: RoomAgent, threadId: string): RoomAgent {
   return agent;
 }
 
-/** Summarization middleware honoring the per-agent overrides (R10). */
+/** Summarization middleware honoring the per-agent overrides. */
 function memoryMiddleware(config: RoomAgentConfig): AnyMiddleware[] {
   const memory = config.memory;
   if (!memory) return [];
@@ -204,6 +208,20 @@ export function createRoomAgent(config: RoomAgentConfig = {}): RoomAgent {
       agentCheckpointPath(config.memoryDir, config.id),
     );
   }
+  const middleware: AnyMiddleware[] = [];
+  if (config.fsTools) {
+    // Tool sets: a same-named filesystem middleware replaces the SDK's
+    // default in its merge, narrowing the built-ins to the agent's
+    // allowlist (`execute` is never in the catalog).
+    middleware.push(
+      createFilesystemMiddleware({
+        backend: config.backend ?? ((runtime: BackendRuntime) => new StateBackend(runtime)),
+        tools: config.fsTools,
+        permissions: config.permissions,
+      }),
+    );
+  }
+  middleware.push(...memoryMiddleware(config));
   // Pass the literal directly so `createDeepAgent`'s generics infer from the
   // values; the interface default for `ContextSchema` differs from the
   // function's and breaks assignment of a pre-typed params object.
@@ -214,7 +232,7 @@ export function createRoomAgent(config: RoomAgentConfig = {}): RoomAgent {
     backend: config.backend,
     checkpointer,
     permissions: config.permissions,
-    middleware: memoryMiddleware(config),
+    middleware,
     name: config.name,
   });
   return config.id ? withStableThread(agent, roomThreadId(config.id)) : agent;

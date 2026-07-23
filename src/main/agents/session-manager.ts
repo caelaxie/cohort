@@ -1,5 +1,5 @@
 /**
- * Session manager (U3; KTD1, R5, R7, F5): owns each room agent's lifecycle
+ * Session manager: owns each room agent's lifecycle
  * in the main process and exposes truthful presence plus a subscription API
  * for the (later) UI.
  *
@@ -55,11 +55,11 @@ export interface AgentFailure {
 export interface TurnOutcome {
   reason: "done" | "cancelled" | "error";
   error?: string;
-  /** Present when the turn failed and the manager applied the F5 policy. */
+  /** Present when the turn failed and the manager applied the failure policy. */
   failure?: AgentFailure;
 }
 
-/** Recorded for every agent whose turn was aborted by `shutdown()` (KTD7). */
+/** Recorded for every agent whose turn was aborted by `shutdown()`. */
 export interface InterruptionMarker {
   agentId: string;
   agentName: string;
@@ -96,6 +96,10 @@ export interface AgentSessionConfig {
   model?: RoomAgentConfig["model"];
   systemPrompt?: RoomAgentConfig["systemPrompt"];
   tools?: RoomAgentConfig["tools"];
+  /** Filesystem built-in allowlist for per-agent tool sets. */
+  fsTools?: RoomAgentConfig["fsTools"];
+  /** Per-agent memory overrides. */
+  memory?: RoomAgentConfig["memory"];
 }
 
 /**
@@ -156,6 +160,8 @@ interface AgentSession {
   /** Automatic init retries used. Capped at 1 — no failure spam. */
   initRetriesUsed: number;
   lastFailure: AgentFailure | null;
+  /** Recreate with the updated config once the in-flight turn settles. */
+  pendingRecreate: boolean;
 }
 
 function describeError(err: unknown): string {
@@ -165,9 +171,12 @@ function describeError(err: unknown): string {
 
 function toRoomConfig(config: AgentSessionConfig): RoomAgentConfig {
   return {
+    id: config.id,
     model: config.model,
     systemPrompt: config.systemPrompt,
     tools: config.tools,
+    fsTools: config.fsTools,
+    memory: config.memory,
     name: config.name,
   };
 }
@@ -213,6 +222,7 @@ export class SessionManager {
       restartsUsed: 0,
       initRetriesUsed: 0,
       lastFailure: null,
+      pendingRecreate: false,
     });
   }
 
@@ -229,7 +239,7 @@ export class SessionManager {
   }
 
   /**
-   * Manual retry affordance (F5): bring an `offline`/`error` agent back to
+   * Manual retry affordance: bring an `offline`/`error` agent back to
    * `connecting` and attempt initialization once.
    */
   async retryAgent(agentId: string): Promise<void> {
@@ -238,6 +248,49 @@ export class SessionManager {
     if (state !== "offline" && state !== "error") return;
     this.applyTransition(s, "restart");
     await this.initAgent(s);
+  }
+
+  /**
+   * Apply a config update (edit flow). A mid-flight turn finishes on the
+   * old config; the instance is recreated once it settles. Idle agents are
+   * recreated immediately, so the next turn always uses the new config.
+   */
+  reconfigure(agentId: string, patch: Partial<AgentSessionConfig>): void {
+    const s = this.requireSession(agentId);
+    s.config = { ...s.config, ...patch, id: s.id };
+    if (patch.name) s.name = patch.name;
+    if (s.activeTurn) {
+      s.pendingRecreate = true;
+      return;
+    }
+    if (s.machine.state !== "stopped") {
+      void this.recreateInstance(s);
+    }
+  }
+
+  /**
+   * Stop and unregister an agent (removal): abort any in-flight turn,
+   * resolve queued sends as cancelled, wait for the turn loop to settle,
+   * and drop the session. The agent's checkpoint file is left on disk.
+   */
+  async stopAgent(agentId: string): Promise<void> {
+    const s = this.requireSession(agentId);
+    if (s.recoveryTimer) {
+      clearTimeout(s.recoveryTimer);
+      s.recoveryTimer = null;
+    }
+    s.pendingRecreate = false;
+    if (s.activeTurn) {
+      s.activeTurn.controller.abort();
+    }
+    for (const queued of s.queue.splice(0)) {
+      queued.resolve({ reason: "cancelled", error: "agent removed" });
+    }
+    if (s.currentExecution) {
+      await s.currentExecution;
+    }
+    this.applyTransition(s, "stop");
+    this.sessions.delete(agentId);
   }
 
   // ------------------------------------------------------------------
@@ -285,7 +338,7 @@ export class SessionManager {
   /**
    * Run a turn for an agent. Sends while the agent is `connecting` are
    * queued and delivered in order once it reaches `idle`; sends while a turn
-   * is in flight are serialized behind it (per-agent FIFO until the U4
+   * is in flight are serialized behind it (per-agent FIFO until the
    * broker takes over folding).
    */
   sendTurn(
@@ -315,7 +368,7 @@ export class SessionManager {
   }
 
   // ------------------------------------------------------------------
-  // Shutdown (R7, KTD7)
+  // Shutdown
   // ------------------------------------------------------------------
 
   /**
@@ -411,7 +464,7 @@ export class SessionManager {
       const message = describeError(err);
       const kind = this.classifyError(message);
       this.recordFailure(s, kind, message);
-      // Init failure lands in offline directly (F5).
+      // Init failure lands in offline directly.
       this.applyTransition(s, "initFailed");
       // Exactly one automatic retry — no restart loops, no failure spam.
       if (kind !== "auth" && s.initRetriesUsed < 1 && !this.shuttingDown) {
@@ -426,13 +479,17 @@ export class SessionManager {
     }
   }
 
-  /** Recreate the instance after a crash/hang (the one allowed restart). */
+  /** Recreate the instance after a crash/hang or a config update. */
   private async recreateInstance(s: AgentSession): Promise<void> {
+    // Legal from error/offline (recovery); from idle it's a no-op, which is
+    // fine — a config-swap recreate doesn't churn presence.
     this.applyTransition(s, "restart");
     try {
       s.agent = await this.factory(toRoomConfig(s.config));
-      if (s.machine.state !== "connecting") return; // stopped meanwhile
-      this.applyTransition(s, "instanceReady");
+      if (s.machine.state === "stopped") return; // removed/stopped meanwhile
+      if (s.machine.state === "connecting") {
+        this.applyTransition(s, "instanceReady");
+      }
       this.pumpQueue(s);
     } catch (err) {
       this.recordFailure(s, "crash", describeError(err));
@@ -440,7 +497,7 @@ export class SessionManager {
     }
   }
 
-  /** F5 recovery policy after a failed turn. */
+  /** Recovery policy after a failed turn. */
   private applyRecoveryPolicy(s: AgentSession, kind: FailureKind): void {
     if (this.shuttingDown || s.machine.state === "stopped") return;
     // Auth failures never fix themselves; offline until manual retry.
@@ -521,7 +578,7 @@ export class SessionManager {
 
     if (turn.hangFired) {
       // The abort surfaces as turn.end(cancelled); re-enter error so the
-      // hang follows the F5 crash path instead of reading as a clean cancel.
+      // hang follows the crash path instead of reading as a clean cancel.
       const failure = this.recordFailure(
         s,
         "hang",
@@ -542,6 +599,14 @@ export class SessionManager {
     }
 
     queued.resolve(outcome);
+    if (s.pendingRecreate) {
+      // Config changed mid-turn: the turn just finished on the old
+      // config; recreate so the NEXT turn uses the new one. The recreate
+      // pumps the queue once the fresh instance is ready.
+      s.pendingRecreate = false;
+      void this.recreateInstance(s);
+      return;
+    }
     this.pumpQueue(s);
   }
 }

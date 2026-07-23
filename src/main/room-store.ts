@@ -1,10 +1,10 @@
 /**
- * Room store (U4; R1, R4, KTD4): the persistent source of truth for the room.
+ * Room store: the persistent source of truth for the room.
  *
  * Everything the UI will read lives here — messages (including system notes
  * and interruption markers), the agent roster, and the raw per-agent turn
  * events that later feed the activity rail. Per-agent memory is a DERIVED
- * view of this history (KTD4): each agent replays what it missed from the
+ * view of this history: each agent replays what it missed from the
  * store's sequence numbers, tracked via a per-agent "last delivered"
  * watermark in the meta table.
  *
@@ -177,7 +177,7 @@ export class RoomStore {
         created_at INTEGER NOT NULL
       );
     `);
-    // Upgrade pre-U6 DBs that lack the interrupted column.
+    // Upgrade older DBs that lack the interrupted column.
     const cols = this.db.prepare("PRAGMA table_info(messages)").all() as {
       name: string;
     }[];
@@ -202,7 +202,7 @@ export class RoomStore {
     };
   }
 
-  /** Subscribe to newly appended turn events (U7 activity projection). */
+  /** Subscribe to newly appended turn events (activity projection). */
   subscribeEvents(listener: EventListener): () => void {
     this.eventListeners.add(listener);
     return () => {
@@ -270,7 +270,7 @@ export class RoomStore {
   }
 
   // ------------------------------------------------------------------
-  // Per-agent delivery watermark (derived per-agent view, KTD4)
+  // Per-agent delivery watermark (derived per-agent view)
   // ------------------------------------------------------------------
 
   getLastDeliveredSeq(agentId: string): number {
@@ -314,6 +314,31 @@ export class RoomStore {
   countAgents(): number {
     const row = this.db.prepare("SELECT COUNT(*) AS n FROM agents").get() as { n: number };
     return row.n;
+  }
+
+  /** Update editable fields; unspecified fields stay as stored. */
+  updateAgent(
+    id: string,
+    patch: { name?: string; persona?: string; config?: Record<string, unknown> },
+  ): void {
+    const current = this.getAgent(id);
+    if (!current) throw new Error(`unknown agent: ${id}`);
+    this.db
+      .prepare("UPDATE agents SET name = ?, persona = ?, config = ? WHERE id = ?")
+      .run(
+        patch.name ?? current.name,
+        patch.persona ?? current.persona,
+        JSON.stringify(patch.config ?? current.config),
+        id,
+      );
+  }
+
+  /**
+   * Remove an agent from the roster. Its messages and checkpoint file
+   * are deliberately retained — history keeps the original attribution.
+   */
+  deleteAgent(id: string): void {
+    this.db.prepare("DELETE FROM agents WHERE id = ?").run(id);
   }
 
   // ------------------------------------------------------------------

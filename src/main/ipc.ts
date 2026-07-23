@@ -1,5 +1,5 @@
 /**
- * Electron IPC registration for settings (U1) and the room surface (U6).
+ * Electron IPC registration for settings and the room surface.
  * Kept free of window creation so tests can exercise the channel map later.
  */
 import { ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from "electron";

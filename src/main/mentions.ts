@@ -1,5 +1,5 @@
 /**
- * @mention parsing (U4; R2, KTD5).
+ * @mention parsing.
  *
  * v1 rules (see the plan's Deferred Implementation Notes):
  * - Mentions are single-token `@Name` references (agent names are expected to

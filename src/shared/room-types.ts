@@ -51,7 +51,7 @@ export interface RoomSnapshot {
 }
 
 // ---------------------------------------------------------------------
-// Activity rail (U7; R8, AE4, KTD11)
+// Activity rail
 // ---------------------------------------------------------------------
 
 export type ToolCallStatus = "running" | "done" | "error" | "interrupted";
@@ -72,7 +72,7 @@ export interface ToolCallDto {
 }
 
 export interface ProducedItemDto {
-  /** Workspace-relative path written during the turn (KTD11). */
+  /** Workspace-relative path written during the turn. */
   path: string;
   toolCallId: string;
 }

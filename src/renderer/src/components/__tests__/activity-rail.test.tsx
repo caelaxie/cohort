@@ -87,8 +87,8 @@ afterEach(() => {
   cleanup();
 });
 
-describe("ActivityRail (U7)", () => {
-  it("shows the current tool call with duration mid-task (AE4)", async () => {
+describe("ActivityRail", () => {
+  it("shows the current tool call with duration mid-task", async () => {
     const client = new FakeClient({
       highWaterSeq: 2,
       activities: [

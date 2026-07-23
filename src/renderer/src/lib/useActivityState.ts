@@ -1,5 +1,5 @@
 /**
- * Activity state hook (U7): hydrates from the projector's roster-complete
+ * Activity state hook: hydrates from the projector's roster-complete
  * snapshot and folds live `activity` pushes. The projector re-emits a whole
  * per-agent DTO on each change, so folding is replace-by-agentId; pushes at
  * or below the snapshot's high-water mark are dropped, which is what makes a

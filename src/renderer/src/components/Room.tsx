@@ -6,11 +6,11 @@ import { MessageList } from "./MessageList";
 
 export interface RoomProps {
   client: RoomClient;
-  /** Open the agent builder (U8 owns the full surface). */
+  /** Open the agent builder. */
   onOpenBuilder: () => void;
   onEditAgent?: (agentId: string) => void;
   onRemoveAgent?: (agentId: string) => void;
-  /** Optional rail slot for U7. */
+  /** Optional rail slot. */
   rail?: React.ReactNode;
 }
 

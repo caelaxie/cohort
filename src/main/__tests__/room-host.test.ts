@@ -131,7 +131,7 @@ describe("RoomHost", () => {
     ).toBe(true);
   });
 
-  it("projects rail activity from a live stub-model turn (U7 × U5 seam)", async () => {
+  it("projects rail activity from a live stub-model turn", async () => {
     const host = new RoomHost({
       roomDbPath: ":memory:",
       sessionOptions: {

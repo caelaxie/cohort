@@ -104,7 +104,7 @@ describe("buildRoomContext", () => {
 });
 
 describe("Broker routing", () => {
-  it("AE1: @mention invokes only the target; others record for replay", async () => {
+  it("@mention invokes only the target; others record for replay", async () => {
     const h = makeHarness({
       scripts: { Scout: [{ tokens: ["Parsers are IO-bound."] }] },
     });
@@ -129,7 +129,7 @@ describe("Broker routing", () => {
     );
   });
 
-  it("AE2: unaddressed message chimes in only the gate-opted persona", async () => {
+  it("unaddressed message chimes in only the gate-opted persona", async () => {
     const h = makeHarness({
       scripts: { Muse: [{ tokens: ["A door opens onto weather."] }] },
       gate: ({ agent }) => agent.name === "Muse",

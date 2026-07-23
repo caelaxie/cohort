@@ -44,7 +44,7 @@ describe("ActivityProjector", () => {
     return activity!;
   }
 
-  it("projects a running tool call mid-turn (AE4)", () => {
+  it("projects a running tool call mid-turn", () => {
     const store = makeStore();
     const projector = makeProjector(store);
 
@@ -119,7 +119,7 @@ describe("ActivityProjector", () => {
     });
   });
 
-  it("derives produced items from workspace writes, deduped by path (KTD11)", () => {
+  it("derives produced items from workspace writes, deduped by path", () => {
     const store = makeStore();
     const projector = makeProjector(store);
 
