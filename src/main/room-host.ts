@@ -14,6 +14,8 @@
 import { join } from "node:path";
 
 import type {
+  ActivitySnapshot,
+  AgentActivityDto,
   AgentFailureDto,
   MemberDto,
   PresenceState,
@@ -21,6 +23,7 @@ import type {
   RoomPushEvent,
   RoomSnapshot,
 } from "../shared/room-types";
+import { ActivityProjector } from "./activity-projector";
 import {
   SessionManager,
   type AgentFailure,
@@ -108,6 +111,7 @@ export class RoomHost {
   readonly store: RoomStore;
   readonly sessions: SessionManager;
   readonly broker: Broker;
+  readonly projector: ActivityProjector;
 
   private readonly listeners = new Set<RoomPushListener>();
   private readonly lastToolByAgent = new Map<string, string | null>();
@@ -123,6 +127,13 @@ export class RoomHost {
       maxChainDepth: options.brokerOptions?.maxChainDepth,
       maxAgents: options.brokerOptions?.maxAgents,
     });
+    this.projector = new ActivityProjector({ store: this.store });
+
+    this.unsubscribers.push(
+      this.projector.subscribe((agentId, activity, eventSeq) => {
+        this.emit({ type: "activity", agentId, activity, eventSeq });
+      }),
+    );
 
     this.unsubscribers.push(
       this.store.subscribeMessages((message) => {
@@ -141,6 +152,7 @@ export class RoomHost {
     for (const unsub of this.unsubscribers) unsub();
     this.unsubscribers.length = 0;
     this.listeners.clear();
+    this.projector.dispose();
     this.broker.dispose();
     // Session manager shutdown is the caller's responsibility (needs await).
   }
@@ -157,6 +169,30 @@ export class RoomHost {
       messages: this.store.listMessages().map(toMessageDto),
       members: this.listMembers(),
     };
+  }
+
+  /**
+   * Roster-complete activity view (U7): every member gets an entry —
+   * agents without folded events get an idle placeholder — and the
+   * high-water mark lets a reloaded renderer dedupe live pushes.
+   */
+  getActivitySnapshot(): ActivitySnapshot {
+    const projected = this.projector.getSnapshot();
+    const byAgent = new Map(projected.activities.map((a) => [a.agentId, a]));
+    const activities: AgentActivityDto[] = this.listMembers().map((member) => {
+      const activity = byAgent.get(member.id);
+      if (activity) {
+        return { ...activity, agentName: member.name };
+      }
+      return {
+        agentId: member.id,
+        agentName: member.name,
+        lastActiveAt: null,
+        current: null,
+        recent: [],
+      };
+    });
+    return { activities, highWaterSeq: projected.highWaterSeq };
   }
 
   listMembers(): MemberDto[] {

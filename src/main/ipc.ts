@@ -27,6 +27,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   ipcMain.removeHandler("room:post-message");
   ipcMain.removeHandler("room:cancel-turn");
   ipcMain.removeHandler("room:retry-agent");
+  ipcMain.removeHandler("activity:get-snapshot");
 
   ipcMain.handle("settings:get", (_event: IpcMainInvokeEvent, key: string) => {
     return ctx.settings.get(key);
@@ -81,6 +82,11 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       await host.retryAgent(agentId);
     },
   );
+
+  ipcMain.handle("activity:get-snapshot", () => {
+    const host = requireHost(ctx);
+    return host.getActivitySnapshot();
+  });
 }
 
 /** Attach the room host's push stream to the active BrowserWindow. */

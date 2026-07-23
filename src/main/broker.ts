@@ -179,6 +179,13 @@ export class Broker {
     // Record raw turn events, assemble reply text, and surface failures.
     this.unsubscribe = this.sessions.subscribe((event) => {
       if (event.type === "failure") {
+        // Persist failures too so the activity rail replays them (U7/F5).
+        this.store.appendEvent({
+          agentId: event.agentId,
+          kind: "failure",
+          payload: event.failure,
+          turnId: this.activeTurnIds.get(event.agentId) ?? null,
+        });
         this.surfaceFailure(event.agentId, event.failure);
         return;
       }
@@ -418,6 +425,18 @@ export class Broker {
 
     const turnId = `turn-${++this.turnCounter}`;
     this.activeTurnIds.set(agentId, turnId);
+    // Mark the turn boundary for the activity projector: which chat
+    // messages spawned this work (U7 — cards link back to chat).
+    this.store.appendEvent({
+      agentId,
+      kind: "turn.begin",
+      payload: {
+        triggerSeqs: batch.triggerSeqs,
+        chainId: batch.chain.id,
+        depth: batch.chain.depth,
+      },
+      turnId,
+    });
     let outcome: TurnOutcome;
     try {
       outcome = await this.sessions.sendTurn(agentId, messages);

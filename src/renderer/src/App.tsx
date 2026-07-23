@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 
 import type { RoomClient } from "../../shared/room-types";
+import { ActivityRail } from "./components/ActivityRail";
 import { Room } from "./components/Room";
 import "./styles.css";
 import "./types";
@@ -31,6 +32,7 @@ export function App(): React.JSX.Element {
         client={client}
         onOpenBuilder={() => setBuilderOpen(true)}
         onEditAgent={() => setBuilderOpen(true)}
+        rail={<ActivityRail client={client} />}
       />
       {builderOpen ? (
         <div className="builder-overlay" data-testid="builder-overlay" role="dialog">

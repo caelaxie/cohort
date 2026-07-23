@@ -32,13 +32,14 @@ export type RoomStatusPhase = "thinking" | "running-tool" | "idle";
 
 export type RoomEvent =
   | { kind: "token"; text: string }
-  | { kind: "tool_call.start"; id: string; name: string; input: unknown }
+  | { kind: "tool_call.start"; id: string; name: string; input: unknown; ns?: string[] }
   | {
       kind: "tool_call.end";
       id: string;
       name: string;
       output?: unknown;
       error?: string;
+      ns?: string[];
     }
   | { kind: "status"; phase: RoomStatusPhase }
   | {
@@ -57,6 +58,8 @@ interface ArgReassembly {
 interface ToolCallState {
   name: string;
   ended: boolean;
+  /** Subgraph namespace the call started in (empty = top-level graph). */
+  ns: string[];
 }
 
 function textContent(content: unknown): string {
@@ -133,7 +136,7 @@ export async function* runTurn(
     for await (const rawChunk of stream) {
       // With subgraphs:true and multiple stream modes, chunks are
       // [namespace, mode, payload] tuples.
-      const [, mode, payload] = rawChunk as [unknown, string, unknown];
+      const [ns, mode, payload] = rawChunk as [string[], string, unknown];
 
       if (mode === "messages") {
         const [message] = payload as [unknown, unknown];
@@ -178,8 +181,14 @@ export async function* runTurn(
                     // finalized message args instead.
                   }
                 }
-                startedToolCalls.set(id, { name: tc.name, ended: false });
-                yield { kind: "tool_call.start", id, name: tc.name, input };
+                startedToolCalls.set(id, { name: tc.name, ended: false, ns });
+                yield {
+                  kind: "tool_call.start",
+                  id,
+                  name: tc.name,
+                  input,
+                  ...(ns.length > 0 ? { ns } : {}),
+                };
               }
             } else if (isToolMessage(m)) {
               const id = m.tool_call_id;
@@ -188,12 +197,14 @@ export async function* runTurn(
               if (state) state.ended = true;
               const name = m.name ?? state?.name ?? "unknown";
               yield* setPhase("running-tool");
+              const callNs = state?.ns ?? ns;
               if (m.status === "error") {
                 yield {
                   kind: "tool_call.end",
                   id,
                   name,
                   error: textContent(m.content),
+                  ...(callNs.length > 0 ? { ns: callNs } : {}),
                 };
               } else {
                 yield {
@@ -201,6 +212,7 @@ export async function* runTurn(
                   id,
                   name,
                   output: textContent(m.content),
+                  ...(callNs.length > 0 ? { ns: callNs } : {}),
                 };
               }
             }

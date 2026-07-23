@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 
 import type {
+  ActivitySnapshot,
   PostMessageResult,
   RoomClient,
   RoomPushEvent,
@@ -9,6 +10,8 @@ import type {
 
 const room: RoomClient = {
   getSnapshot: (): Promise<RoomSnapshot> => ipcRenderer.invoke("room:get-snapshot"),
+  getActivitySnapshot: (): Promise<ActivitySnapshot> =>
+    ipcRenderer.invoke("activity:get-snapshot"),
   postMessage: (text: string): Promise<PostMessageResult> =>
     ipcRenderer.invoke("room:post-message", text),
   cancelTurn: (agentId: string): Promise<boolean> =>

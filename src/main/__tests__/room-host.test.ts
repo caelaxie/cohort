@@ -130,4 +130,53 @@ describe("RoomHost", () => {
         .some((m) => m.authorType === "system" && /Interrupted/i.test(m.text)),
     ).toBe(true);
   });
+
+  it("projects rail activity from a live stub-model turn (U7 × U5 seam)", async () => {
+    const host = new RoomHost({
+      roomDbPath: ":memory:",
+      sessionOptions: {
+        factory: (config) =>
+          createRoomAgent({
+            model: new StubChatModel({
+              script: [
+                {
+                  tokens: ["On it."],
+                  toolCalls: [
+                    { name: "write_file", args: { file_path: "notes.md", content: "x" }, id: "w1" },
+                  ],
+                },
+                { tokens: ["Done — wrote notes.md"] },
+              ],
+            }),
+            name: config.name,
+          }),
+      },
+    });
+    hosts.push(host);
+    const events: RoomPushEvent[] = [];
+    host.subscribe((e) => events.push(e));
+    await host.broker.addAgent({ id: "muse", name: "Muse", persona: "writer" });
+
+    const { seq } = await host.postMessage("@Muse write me notes");
+    await host.broker.idle();
+
+    const snapshot = host.getActivitySnapshot();
+    expect(snapshot.highWaterSeq).toBeGreaterThan(0);
+    const muse = snapshot.activities.find((a) => a.agentId === "muse");
+    expect(muse).toBeDefined();
+    expect(muse!.current).toBeNull();
+    expect(muse!.recent).toHaveLength(1);
+    const turn = muse!.recent[0];
+    expect(turn.outcome).toBe("done");
+    expect(turn.originSeqs).toContain(seq);
+    const write = turn.toolCalls.find((c) => c.name === "write_file");
+    expect(write).toBeDefined();
+    expect(write!.status).toBe("done");
+    expect(write!.output).toBeDefined();
+    expect(write!.durationMs).toBeGreaterThanOrEqual(0);
+    expect(turn.produced).toEqual([{ path: "notes.md", toolCallId: "w1" }]);
+
+    // Live activity pushes flowed while the turn ran.
+    expect(events.some((e) => e.type === "activity" && e.agentId === "muse")).toBe(true);
+  });
 });

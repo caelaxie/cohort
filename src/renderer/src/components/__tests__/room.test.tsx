@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  ActivitySnapshot,
   MemberDto,
   RoomClient,
   RoomMessageDto,
@@ -53,6 +54,10 @@ class FakeClient implements RoomClient {
 
   async getSnapshot(): Promise<RoomSnapshot> {
     return this.snapshot;
+  }
+
+  async getActivitySnapshot(): Promise<ActivitySnapshot> {
+    return { activities: [], highWaterSeq: 0 };
   }
 
   async postMessage(text: string): Promise<{ seq: number; chainId: string }> {

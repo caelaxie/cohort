@@ -132,10 +132,12 @@ function toAgent(row: AgentRow): RoomAgentRecord {
 const LAST_DELIVERED_PREFIX = "lastDelivered:";
 
 export type MessageListener = (message: RoomMessage) => void;
+export type EventListener = (event: RoomEventRecord) => void;
 
 export class RoomStore {
   private readonly db: Database.Database;
   private readonly messageListeners = new Set<MessageListener>();
+  private readonly eventListeners = new Set<EventListener>();
 
   constructor(path: string) {
     this.db = new Database(path);
@@ -188,6 +190,7 @@ export class RoomStore {
 
   close(): void {
     this.messageListeners.clear();
+    this.eventListeners.clear();
     this.db.close();
   }
 
@@ -196,6 +199,14 @@ export class RoomStore {
     this.messageListeners.add(listener);
     return () => {
       this.messageListeners.delete(listener);
+    };
+  }
+
+  /** Subscribe to newly appended turn events (U7 activity projection). */
+  subscribeEvents(listener: EventListener): () => void {
+    this.eventListeners.add(listener);
+    return () => {
+      this.eventListeners.delete(listener);
     };
   }
 
@@ -319,7 +330,7 @@ export class RoomStore {
          VALUES (?, ?, ?, ?, ?, ?)`,
       )
       .run(seq, input.agentId, input.kind, payload, input.turnId ?? null, createdAt);
-    return {
+    const record: RoomEventRecord = {
       id: Number(info.lastInsertRowid),
       seq,
       agentId: input.agentId,
@@ -328,6 +339,10 @@ export class RoomStore {
       turnId: input.turnId ?? null,
       createdAt,
     };
+    for (const listener of this.eventListeners) {
+      listener(record);
+    }
+    return record;
   }
 
   listEvents(options: { agentId?: string; afterSeq?: number } = {}): RoomEventRecord[] {
