@@ -176,8 +176,12 @@ export class Broker {
     this.maxChainDepth = options.maxChainDepth ?? MAX_CHAIN_DEPTH;
     this.maxAgents = options.maxAgents ?? MAX_AGENTS;
 
-    // Record raw turn events and assemble reply text from token streams.
+    // Record raw turn events, assemble reply text, and surface failures.
     this.unsubscribe = this.sessions.subscribe((event) => {
+      if (event.type === "failure") {
+        this.surfaceFailure(event.agentId, event.failure);
+        return;
+      }
       if (event.type !== "turn.event") return;
       this.store.appendEvent({
         agentId: event.agentId,
@@ -335,6 +339,23 @@ export class Broker {
     });
   }
 
+  /** Write a chat-visible failure note (F5); auth gets a distinct surface. */
+  private surfaceFailure(
+    agentId: string,
+    failure: { kind: string; message: string; retryable: boolean },
+  ): void {
+    const name = this.store.getAgent(agentId)?.name ?? agentId;
+    if (failure.kind === "auth") {
+      this.appendSystemNote(
+        `${name} can't reach the model — check the API key.` +
+          (failure.retryable ? " Retry when ready." : ""),
+      );
+      return;
+    }
+    const hint = failure.retryable ? " Tap retry to bring them back." : "";
+    this.appendSystemNote(`${name} hit an error: ${failure.message}.${hint}`);
+  }
+
   private dispatch(agentId: string, triggerSeqs: number[], chain: ChainContext): void {
     const current = this.chainDepths.get(chain.id) ?? 0;
     this.chainDepths.set(chain.id, Math.max(current, chain.depth));
@@ -406,9 +427,23 @@ export class Broker {
     const reply = (this.tokenBuffers.get(agentId) ?? []).join("");
     this.tokenBuffers.delete(agentId);
 
+    if (outcome.reason === "cancelled") {
+      // Keep any partial reply in history with an interrupted marker (U6/F5).
+      // Watermark stays put so undelivered triggers replay next invocation.
+      if (reply.trim()) {
+        this.store.appendMessage({
+          authorType: "agent",
+          authorId: agent.id,
+          authorName: agent.name,
+          text: reply,
+          interrupted: true,
+        });
+      }
+      return;
+    }
+
     if (outcome.reason !== "done") {
-      // Cancelled/failed turns leave the watermark alone so the messages
-      // replay on the next invocation.
+      // Failed turns leave the watermark alone so the messages replay next.
       return;
     }
 

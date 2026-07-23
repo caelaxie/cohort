@@ -28,6 +28,8 @@ export interface RoomMessage {
   authorName: string;
   text: string;
   createdAt: number;
+  /** True when this is a partial agent reply kept after cancellation. */
+  interrupted: boolean;
 }
 
 export interface RoomAgentRecord {
@@ -54,6 +56,7 @@ export interface AppendMessageInput {
   authorName: string;
   text: string;
   createdAt?: number;
+  interrupted?: boolean;
 }
 
 export interface AppendEventInput {
@@ -72,6 +75,7 @@ interface MessageRow {
   author_name: string;
   text: string;
   created_at: number;
+  interrupted: number;
 }
 
 interface EventRow {
@@ -100,6 +104,7 @@ function toMessage(row: MessageRow): RoomMessage {
     authorName: row.author_name,
     text: row.text,
     createdAt: row.created_at,
+    interrupted: Boolean(row.interrupted),
   };
 }
 
@@ -126,8 +131,11 @@ function toAgent(row: AgentRow): RoomAgentRecord {
 
 const LAST_DELIVERED_PREFIX = "lastDelivered:";
 
+export type MessageListener = (message: RoomMessage) => void;
+
 export class RoomStore {
   private readonly db: Database.Database;
+  private readonly messageListeners = new Set<MessageListener>();
 
   constructor(path: string) {
     this.db = new Database(path);
@@ -148,7 +156,8 @@ export class RoomStore {
         author_id TEXT NOT NULL,
         author_name TEXT NOT NULL,
         text TEXT NOT NULL,
-        created_at INTEGER NOT NULL
+        created_at INTEGER NOT NULL,
+        interrupted INTEGER NOT NULL DEFAULT 0
       );
       CREATE TABLE IF NOT EXISTS agents (
         id TEXT PRIMARY KEY,
@@ -166,10 +175,28 @@ export class RoomStore {
         created_at INTEGER NOT NULL
       );
     `);
+    // Upgrade pre-U6 DBs that lack the interrupted column.
+    const cols = this.db.prepare("PRAGMA table_info(messages)").all() as {
+      name: string;
+    }[];
+    if (!cols.some((c) => c.name === "interrupted")) {
+      this.db.exec(
+        "ALTER TABLE messages ADD COLUMN interrupted INTEGER NOT NULL DEFAULT 0",
+      );
+    }
   }
 
   close(): void {
+    this.messageListeners.clear();
     this.db.close();
+  }
+
+  /** Subscribe to newly appended messages. Returns unsubscribe. */
+  subscribeMessages(listener: MessageListener): () => void {
+    this.messageListeners.add(listener);
+    return () => {
+      this.messageListeners.delete(listener);
+    };
   }
 
   // ------------------------------------------------------------------
@@ -179,13 +206,22 @@ export class RoomStore {
   appendMessage(input: AppendMessageInput): RoomMessage {
     const seq = this.nextSeq("messages");
     const createdAt = input.createdAt ?? Date.now();
+    const interrupted = input.interrupted ? 1 : 0;
     const info = this.db
       .prepare(
-        `INSERT INTO messages (seq, author_type, author_id, author_name, text, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO messages (seq, author_type, author_id, author_name, text, created_at, interrupted)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(seq, input.authorType, input.authorId, input.authorName, input.text, createdAt);
-    return {
+      .run(
+        seq,
+        input.authorType,
+        input.authorId,
+        input.authorName,
+        input.text,
+        createdAt,
+        interrupted,
+      );
+    const message: RoomMessage = {
       id: Number(info.lastInsertRowid),
       seq,
       authorType: input.authorType,
@@ -193,7 +229,12 @@ export class RoomStore {
       authorName: input.authorName,
       text: input.text,
       createdAt,
+      interrupted: Boolean(interrupted),
     };
+    for (const listener of this.messageListeners) {
+      listener(message);
+    }
+    return message;
   }
 
   /** All messages in sequence order, optionally only those after `afterSeq`. */

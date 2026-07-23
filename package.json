@@ -13,26 +13,30 @@
     "postinstall": "electron-rebuild -f -w better-sqlite3 -o @langchain/langgraph-checkpoint-sqlite"
   },
   "dependencies": {
+    "@langchain/core": "^1.2.0",
     "@langchain/langgraph-checkpoint-sqlite": "^1.0.3",
     "better-sqlite3": "^12.0.0",
     "deepagents": "1.11.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "zod": "^3.24.0",
-    "@langchain/core": "^1.2.0"
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@electron/rebuild": "^3.6.0",
     "@eslint/js": "^9.17.0",
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.0",
     "@types/react": "^19.1.0",
-    "@types/react-dom": "^19.1.0",
+    "@types/react-dom": "^19.2.3",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
     "electron": "^33.4.0",
     "electron-vite": "^2.3.0",
     "eslint": "^9.17.0",
+    "jsdom": "^29.1.1",
     "typescript": "^5.7.0",
     "vite": "^5.4.0",
     "vitest": "^2.1.8"
