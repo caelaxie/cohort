@@ -351,6 +351,178 @@
 <p>The one-line summary of the whole design: <strong>the model proposes, the harness disposes, the store remembers, and the jail holds.</strong></p>
 </div>
 
+<h2>9. One process, many agents: the concurrency model</h2>
+
+<div class="prose">
+<p>A question that comes up the moment you picture several agents working in one room: <em>are these agents independent processes?</em> It is a good question, because the answer shapes everything about how the app is built — and the answer is no. To see why that is not as reckless as it sounds, it helps to start from what a process even is.</p>
+</div>
+
+<h3>9.1 What a process is, and why it costs something</h3>
+
+<div class="prose">
+<p>An operating-system <strong>process</strong> is a fenced-off box of memory with a program running inside it. The fence is the valuable part: one process cannot read another process's memory, and if one crashes, the others keep running. If every agent in the room were its own process, a crashing agent could never take the others down with it.</p>
+
+<p>But the fence has a price, and it is charged in three currencies. <strong>Memory and startup time:</strong> each process carries a whole runtime — for a Node.js sidecar, tens of megabytes and a noticeable startup pause, per agent. <strong>A wire protocol:</strong> every word between the app and the agent must cross the fence, so someone has to design a message format (usually JSON over stdio or a socket), version it, and debug it. <strong>Duplicated observation:</strong> the app can no longer <em>see</em> what the agent is doing — it can only see what the agent's process chooses to report, so presence and activity become a reporting problem instead of just reading shared state.</p>
+</div>
+
+<figure>
+  <svg width="700" height="270" viewBox="0 0 700 270" role="img" aria-label="Two architectures: process-per-agent versus objects in one process">
+    <defs>
+      <marker id="arr9a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#9a6a00"/>
+      </marker>
+      <marker id="arr9b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#1e7e46"/>
+      </marker>
+    </defs>
+    <g font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="12">
+      <text x="170" y="22" text-anchor="middle" font-weight="700" fill="#9a6a00" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">Option A — a process per agent</text>
+      <rect x="30" y="40" width="280" height="210" rx="10" fill="none" stroke="#c9ced8" stroke-dasharray="5 4"/>
+      <rect x="50" y="60" width="110" height="46" rx="8" fill="#ffffff" stroke="#9a6a00" stroke-width="2"/>
+      <text x="105" y="79" text-anchor="middle" font-weight="700" stroke="#ffffff" stroke-width="4" paint-order="stroke">main app</text>
+      <text x="105" y="95" text-anchor="middle" fill="#5b6270" font-size="10.5" stroke="#ffffff" stroke-width="4" paint-order="stroke">process 1</text>
+      <rect x="190" y="60" width="100" height="46" rx="8" fill="#ffffff" stroke="#9a6a00" stroke-width="2"/>
+      <text x="240" y="79" text-anchor="middle" font-weight="700" stroke="#ffffff" stroke-width="4" paint-order="stroke">Scout</text>
+      <text x="240" y="95" text-anchor="middle" fill="#5b6270" font-size="10.5" stroke="#ffffff" stroke-width="4" paint-order="stroke">process 2</text>
+      <rect x="190" y="126" width="100" height="46" rx="8" fill="#ffffff" stroke="#9a6a00" stroke-width="2"/>
+      <text x="240" y="145" text-anchor="middle" font-weight="700" stroke="#ffffff" stroke-width="4" paint-order="stroke">Muse</text>
+      <text x="240" y="161" text-anchor="middle" fill="#5b6270" font-size="10.5" stroke="#ffffff" stroke-width="4" paint-order="stroke">process 3</text>
+      <rect x="190" y="192" width="100" height="46" rx="8" fill="#ffffff" stroke="#9a6a00" stroke-width="2"/>
+      <text x="240" y="211" text-anchor="middle" font-weight="700" stroke="#ffffff" stroke-width="4" paint-order="stroke">Ada</text>
+      <text x="240" y="227" text-anchor="middle" fill="#5b6270" font-size="10.5" stroke="#ffffff" stroke-width="4" paint-order="stroke">process 4</text>
+      <line x1="160" y1="83" x2="188" y2="83" stroke="#9a6a00" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#arr9a)"/>
+      <line x1="130" y1="106" x2="210" y2="126" stroke="#9a6a00" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#arr9a)"/>
+      <line x1="120" y1="106" x2="225" y2="192" stroke="#9a6a00" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#arr9a)"/>
+      <text x="170" y="262" text-anchor="middle" fill="#9a6a00" font-size="10.5" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">every arrow = serialize, send, parse</text>
+      <text x="525" y="22" text-anchor="middle" font-weight="700" fill="#1e7e46" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">Option B — objects in one process (this app)</text>
+      <rect x="380" y="40" width="290" height="210" rx="10" fill="#eaf1fb" stroke="#1e7e46" stroke-width="2"/>
+      <text x="525" y="58" text-anchor="middle" fill="#1e7e46" font-size="10.5" stroke="#eaf1fb" stroke-width="4" paint-order="stroke">the Electron main process — one box of shared memory</text>
+      <rect x="398" y="70" width="120" height="40" rx="8" fill="#ffffff" stroke="#c9ced8" stroke-width="1.5"/>
+      <text x="458" y="94" text-anchor="middle" font-weight="700" stroke="#ffffff" stroke-width="4" paint-order="stroke">broker</text>
+      <rect x="398" y="126" width="120" height="40" rx="8" fill="#ffffff" stroke="#c9ced8" stroke-width="1.5"/>
+      <text x="458" y="150" text-anchor="middle" font-weight="700" stroke="#ffffff" stroke-width="4" paint-order="stroke">room store</text>
+      <rect x="398" y="182" width="120" height="40" rx="8" fill="#ffffff" stroke="#c9ced8" stroke-width="1.5"/>
+      <text x="458" y="206" text-anchor="middle" font-weight="700" stroke="#ffffff" stroke-width="4" paint-order="stroke">rail projector</text>
+      <rect x="548" y="70" width="104" height="40" rx="8" fill="#ffffff" stroke="#1e7e46" stroke-width="1.5"/>
+      <text x="600" y="94" text-anchor="middle" font-weight="700" stroke="#ffffff" stroke-width="4" paint-order="stroke">Scout obj</text>
+      <rect x="548" y="126" width="104" height="40" rx="8" fill="#ffffff" stroke="#1e7e46" stroke-width="1.5"/>
+      <text x="600" y="150" text-anchor="middle" font-weight="700" stroke="#ffffff" stroke-width="4" paint-order="stroke">Muse obj</text>
+      <rect x="548" y="182" width="104" height="40" rx="8" fill="#ffffff" stroke="#1e7e46" stroke-width="1.5"/>
+      <text x="600" y="206" text-anchor="middle" font-weight="700" stroke="#ffffff" stroke-width="4" paint-order="stroke">Ada obj</text>
+      <line x1="518" y1="90" x2="546" y2="90" stroke="#1e7e46" stroke-width="1.8" marker-end="url(#arr9b)"/>
+      <line x1="478" y1="126" x2="580" y2="110" stroke="#1e7e46" stroke-width="1.8" marker-end="url(#arr9b)"/>
+      <line x1="478" y1="182" x2="590" y2="166" stroke="#1e7e46" stroke-width="1.8" marker-end="url(#arr9b)"/>
+      <text x="525" y="262" text-anchor="middle" fill="#1e7e46" font-size="10.5" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">every arrow = a plain function call</text>
+    </g>
+  </svg>
+  <figcaption>The design fork. Option A buys crash isolation and pays for it in protocol and ceremony; Option B pays with a shared fate and buys simplicity, speed, and perfect visibility.</figcaption>
+</figure>
+
+<h3>9.2 An agent is an object, not a program</h3>
+
+<div class="prose">
+<p>This repo chooses Option B, deliberately. An agent here is not a program you launch; it is a <strong>JavaScript object</strong> — a bundle of data and functions that lives in the same memory box as everything else in the Electron main process. Creating an agent means calling a constructor (<code>createRoomAgent</code>). Running a turn means calling a method on that object and awaiting what comes back. There is no fence, so there is nothing to serialize: when the turn runner emits an event, the broker, the presence machine, and the activity rail all read <em>the same object in memory</em>, each for its own purpose. That is why three live views of one turn (chat, presence, rail) stay consistent with zero coordination code.</p>
+
+<p>It also explains something from §3: quitting the app stops every agent, because the agents <em>are</em> the app. There is nothing left running to clean up — only the interruption markers written to the store on the way down, and the checkpoint files waiting for next launch.</p>
+</div>
+
+<h3>9.3 Doing many things "at once" with a single thread</h3>
+
+<div class="prose">
+<p>The follow-up question is immediate: if everything shares one process (and one thread), how do Scout and Muse work at the same time? The honest answer is that they do not — not literally, not on two CPU cores. They <strong>interleave</strong>, and the trick that makes interleaving feel like simultaneity is the <strong>event loop</strong>.</p>
+
+<p>Picture one very fast worker with a stack of tickets. Most of any turn is not computing — it is <em>waiting</em>: waiting for the model's next token, waiting for a web fetch, waiting for the disk. The worker's rule is simple: never sit idle during a wait. The moment a ticket says "I need to wait" (in code, an <code>await</code>), the worker puts it down and picks up the next one. While Scout's turn is waiting on a search fetch, the worker is streaming Muse's tokens; while Muse waits on the model, the worker is writing Scout's tool result to the store. On a millisecond timescale the lane below is what "two agents working at once" actually looks like:</p>
+</div>
+
+<figure>
+  <svg width="700" height="210" viewBox="0 0 700 210" role="img" aria-label="The event loop interleaving two agents' turns on one thread">
+    <g font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="11.5">
+      <text x="30" y="26" fill="#5b6270" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">one worker, one lane —</text>
+      <rect x="30" y="50" width="90" height="34" rx="6" fill="#eaf1fb" stroke="#2f5fb3" stroke-width="1.5"/>
+      <text x="75" y="71" text-anchor="middle" fill="#2f5fb3" stroke="#eaf1fb" stroke-width="4" paint-order="stroke">Scout: think</text>
+      <rect x="124" y="50" width="70" height="34" rx="6" fill="#ffffff" stroke="#c9ced8" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <text x="159" y="71" text-anchor="middle" fill="#5b6270" font-size="10" stroke="#ffffff" stroke-width="4" paint-order="stroke">…waiting</text>
+      <rect x="198" y="50" width="100" height="34" rx="6" fill="#e8f5ec" stroke="#1e7e46" stroke-width="1.5"/>
+      <text x="248" y="71" text-anchor="middle" fill="#1e7e46" stroke="#e8f5ec" stroke-width="4" paint-order="stroke">Muse: tokens</text>
+      <rect x="302" y="50" width="70" height="34" rx="6" fill="#ffffff" stroke="#c9ced8" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <text x="337" y="71" text-anchor="middle" fill="#5b6270" font-size="10" stroke="#ffffff" stroke-width="4" paint-order="stroke">…waiting</text>
+      <rect x="376" y="50" width="110" height="34" rx="6" fill="#eaf1fb" stroke="#2f5fb3" stroke-width="1.5"/>
+      <text x="431" y="71" text-anchor="middle" fill="#2f5fb3" font-size="10.5" stroke="#eaf1fb" stroke-width="4" paint-order="stroke">Scout: tool result</text>
+      <rect x="490" y="50" width="90" height="34" rx="6" fill="#e8f5ec" stroke="#1e7e46" stroke-width="1.5"/>
+      <text x="535" y="71" text-anchor="middle" fill="#1e7e46" font-size="10.5" stroke="#e8f5ec" stroke-width="4" paint-order="stroke">Muse: think</text>
+      <rect x="584" y="50" width="86" height="34" rx="6" fill="#eaf1fb" stroke="#2f5fb3" stroke-width="1.5"/>
+      <text x="627" y="71" text-anchor="middle" fill="#2f5fb3" font-size="10.5" stroke="#eaf1fb" stroke-width="4" paint-order="stroke">Scout: reply</text>
+      <line x1="30" y1="100" x2="670" y2="100" stroke="#c9ced8" stroke-width="1"/>
+      <text x="30" y="118" fill="#5b6270" font-size="10.5" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">time →</text>
+      <rect x="30" y="140" width="16" height="16" rx="4" fill="#eaf1fb" stroke="#2f5fb3"/>
+      <text x="52" y="153" fill="#3d4452" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">Scout's turn</text>
+      <rect x="140" y="140" width="16" height="16" rx="4" fill="#e8f5ec" stroke="#1e7e46"/>
+      <text x="162" y="153" fill="#3d4452" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">Muse's turn</text>
+      <rect x="250" y="140" width="16" height="16" rx="4" fill="#ffffff" stroke="#c9ced8" stroke-dasharray="4 3"/>
+      <text x="272" y="153" fill="#3d4452" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">await — the worker switches tickets here</text>
+      <text x="30" y="186" fill="#5b6270" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">No parallelism, yet nothing stalls: every wait is someone else's chance to run.</text>
+    </g>
+  </svg>
+  <figcaption>The event loop in one lane. Interleaving, not parallelism — and it is enough, because turns are almost entirely I/O waits.</figcaption>
+</figure>
+
+<div class="prose">
+<p>This model comes with two ground rules, and the codebase respects both. <strong>Rule one: never block the lane.</strong> A slow <em>synchronous</em> chunk of work would freeze every agent, the UI, everything — the worker cannot switch tickets mid-thought. That is why the hot paths are kept thin: the SQLite calls are synchronous, but each takes microseconds, and everything slow (model streaming, network fetches) is asynchronous I/O. <strong>Rule two: the lane has one fate.</strong> A bug that crashes the main process takes the whole room down at once. Agents have independent state, but they share a destiny — which is exactly why the failure machinery from §5 (one auto-restart, then offline with a Retry button) and the quit ritual from §6 (abort, mark, flush) exist.</p>
+</div>
+
+<h3>9.4 The independence agents <em>do</em> have</h3>
+
+<div class="prose">
+<p>"Not independent processes" turns out to be much less than "not independent." Per agent, the app keeps five separate things, and together they are what make agents feel like distinct beings rather than one shared brain:</p>
+</div>
+
+<figure>
+  <svg width="700" height="250" viewBox="0 0 700 250" role="img" aria-label="Durable identity versus disposable instance">
+    <defs>
+      <marker id="arr9c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#2f5fb3"/>
+      </marker>
+    </defs>
+    <g font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="12.5">
+      <rect x="30" y="30" width="290" height="190" rx="10" fill="#ffffff" stroke="#1e7e46" stroke-width="2"/>
+      <text x="175" y="54" text-anchor="middle" font-weight="700" fill="#1e7e46" stroke="#ffffff" stroke-width="4" paint-order="stroke">Durable — survives edits and restarts</text>
+      <text x="50" y="86" fill="#3d4452" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">• the agent id ("scout")</text>
+      <text x="50" y="112" fill="#3d4452" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">• the roster record (name, persona, config)</text>
+      <text x="50" y="138" fill="#3d4452" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">• the checkpoint file — its memory</text>
+      <text x="50" y="164" fill="#3d4452" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">• its message history and attribution</text>
+      <text x="50" y="190" fill="#3d4452" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">• its delivery watermark</text>
+      <rect x="380" y="30" width="290" height="190" rx="10" fill="#ffffff" stroke="#c9ced8" stroke-width="2" stroke-dasharray="6 4"/>
+      <text x="525" y="54" text-anchor="middle" font-weight="700" fill="#5b6270" stroke="#ffffff" stroke-width="4" paint-order="stroke">Disposable — recreated on demand</text>
+      <text x="400" y="86" fill="#3d4452" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">• the live instance (model + middleware)</text>
+      <text x="400" y="112" fill="#3d4452" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">• its AbortController — per-turn cancellation</text>
+      <text x="400" y="138" fill="#3d4452" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">• its presence state machine</text>
+      <text x="400" y="164" fill="#3d4452" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">• its FIFO queue of pending turns</text>
+      <line x1="322" y1="125" x2="376" y2="125" stroke="#2f5fb3" stroke-width="2" marker-end="url(#arr9c)"/>
+      <text x="349" y="112" text-anchor="middle" fill="#2f5fb3" font-size="10.5" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">recreate at the</text>
+      <text x="349" y="143" text-anchor="middle" fill="#2f5fb3" font-size="10.5" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">next turn boundary</text>
+    </g>
+  </svg>
+  <figcaption>What makes Scout Scout. The left column is who the agent <em>is</em>; the right column is just the current body — cancellable, replaceable, and cheap to rebuild from the left.</figcaption>
+</figure>
+
+<div class="prose">
+<p>Because the left column is per-agent, so are the consequences. Cancelling Scout's turn touches Scout's <code>AbortController</code> and nothing of Muse's. A model error moves <em>one</em> presence machine to error or offline; the rest of the room keeps chatting. Editing one agent recreates one instance. Removal deletes one roster row while its history and checkpoint stay behind. The room degrades agent-by-agent, never all-at-once — unless the shared process itself dies, which brings us back to rule two.</p>
+</div>
+
+<h3>9.5 Why this trade wins <em>here</em></h3>
+
+<div class="prose">
+<p>The honest way to frame the choice is as a swap: the app gives up crash isolation between agents and gets four things in return. <strong>No wire protocol</strong> to design, version, or debug — events are typed objects, not messages. <strong>Perfect observability</strong> for free — presence and the rail read the same stream the broker sees. <strong>Cheap agents</strong> — an eighth agent costs an object, not a runtime. <strong>A single source of truth</strong> with synchronous access — one SQLite connection, no distributed state.</p>
+
+<p>And the isolation that was given up is deliberately replaced by the walls from §8: the jailed filesystem bounds what a bad tool call can touch, the missing shell bounds what a tool call can <em>be</em>, and the chain and membership caps bound what agents can do to each other. For a single-user desktop app with at most eight short-lived agents, that is the right wall to spend the budget on. If this ever became a multi-tenant service with untrusted agents, the swap would flip — and process-per-agent would stop being ceremony and start being the point.</p>
+</div>
+
+<div class="callout">
+  <span class="label">The whole section in one line</span>
+  Agents here are independent <em>actors</em>, not independent <em>processes</em>: separate memory, separate fates at the turn level, one shared process underneath — with the jail, not the OS, holding the line between them.
+</div>
+
+
 <footer>Composed 2026-07-24 by ce-explain</footer>
 
 </div>
