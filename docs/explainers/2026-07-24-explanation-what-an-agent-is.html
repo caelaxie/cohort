@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What an Agent Is — in this repo, in plain language</title>
+<style>
+  :root {
+    --ink: #20242c;
+    --muted: #5b6270;
+    --accent: #2f5fb3;
+    --accent-soft: #eaf1fb;
+    --paper: #fdfcfa;
+    --card: #ffffff;
+    --line: #e2dfd6;
+    --ok: #1e7e46;
+    --warn: #9a6a00;
+    --bad: #b3261e;
+    --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-size: 18px;
+    line-height: 1.62;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 36px 20px 80px; }
+  .prose { max-width: 70ch; }
+  h1, h2, h3 { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; line-height: 1.3; }
+  h1 { font-size: 1.9rem; margin: 0 0 0.3em; }
+  h2 { font-size: 1.4rem; margin: 2.2em 0 0.6em; border-bottom: 2px solid var(--line); padding-bottom: 0.3em; }
+  h3 { font-size: 1.1rem; margin: 1.6em 0 0.4em; }
+  p { margin: 0.9em 0; }
+  code { font-family: var(--mono); font-size: 0.84em; background: #f0eee7; padding: 1px 5px; border-radius: 4px; }
+  dl.meta {
+    font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+    font-size: 0.85rem;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--card);
+    padding: 14px 18px;
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 4px 16px;
+    margin: 20px 0 0;
+  }
+  dl.meta dt { font-weight: 700; color: var(--ink); }
+  dl.meta dd { margin: 0; }
+  .callout {
+    max-width: 70ch;
+    border-left: 4px solid var(--accent);
+    background: var(--accent-soft);
+    border-radius: 0 10px 10px 0;
+    padding: 12px 18px;
+    margin: 20px 0;
+  }
+  .callout .label {
+    font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+    font-size: 0.75rem; font-weight: 700; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--accent); display: block; margin-bottom: 3px;
+  }
+  figure { margin: 26px 0; }
+  figure svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+  figcaption {
+    font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+    font-size: 0.82rem; color: var(--muted); text-align: center; margin-top: 10px;
+  }
+  pre {
+    font-family: var(--mono); font-size: 0.78rem; line-height: 1.5;
+    background: #22252c; color: #e8ecf4;
+    padding: 16px 18px; border-radius: 10px; overflow-x: auto;
+    white-space: pre-wrap;
+  }
+  pre .c { color: #8b93a7; }
+  pre .k { color: #6ea8fe; }
+  pre .s { color: #7fd99a; }
+  .annot { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; font-size: 0.85rem; color: var(--muted); margin: -8px 0 18px; max-width: 70ch; }
+  .strip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; margin: 18px 0; }
+  .state { border: 1.5px solid #c9ced8; border-radius: 999px; padding: 4px 14px; font-size: 0.8rem; background: #fff; }
+  .state.hot { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+  .state.err { border-color: var(--bad); color: var(--bad); }
+  .arrow { color: var(--accent); font-weight: 700; }
+  footer {
+    margin-top: 48px; padding-top: 14px; border-top: 1px solid var(--line);
+    font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+    font-size: 0.8rem; color: var(--muted);
+  }
+  @media (max-width: 640px) { body { font-size: 16px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>What an Agent Is</h1>
+<div class="prose">
+<p>In plain language, with the real machinery from Agent Room.</p>
+</div>
+
+<dl class="meta">
+  <dt>Date</dt><dd>2026-07-24</dd>
+  <dt>Input shape</dt><dd>concept</dd>
+  <dt>Subject</dt><dd>agent — what an agent is, as built in Agent Room (deepagents SDK, session manager, turn runner, broker)</dd>
+</dl>
+
+<h2>1. A chat model answers; an agent loops</h2>
+
+<div class="prose">
+<p>Start with the thing an agent is <em>not</em>. A chat model is a function: text in, text out. You ask a question, it writes an answer, and the interaction is over. Nothing <em>happens</em> in the world because of it.</p>
+
+<p>An agent is that same model wrapped in a <strong>loop</strong>. The model is allowed to say, instead of an answer, "I need to do something first" — call a <em>tool</em>. The harness runs the tool, hands the result back to the model, and the model decides again: another action, or a final answer. Think, act, observe, repeat — until the model decides it is done.</p>
+</div>
+
+<figure>
+  <svg width="640" height="220" viewBox="0 0 640 220" role="img" aria-label="The agent loop: think, act, observe, repeat">
+    <defs>
+      <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#2f5fb3"/>
+      </marker>
+    </defs>
+    <g font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14">
+      <rect x="40" y="80" width="150" height="60" rx="10" fill="#eaf1fb" stroke="#2f5fb3" stroke-width="1.5"/>
+      <text x="115" y="106" text-anchor="middle" font-weight="700" fill="#2f5fb3" stroke="#eaf1fb" stroke-width="4" paint-order="stroke">THINK</text>
+      <text x="115" y="126" text-anchor="middle" fill="#5b6270" font-size="12" stroke="#eaf1fb" stroke-width="4" paint-order="stroke">model proposes</text>
+
+      <rect x="255" y="80" width="150" height="60" rx="10" fill="#ffffff" stroke="#c9ced8" stroke-width="1.5"/>
+      <text x="330" y="106" text-anchor="middle" font-weight="700" fill="#20242c" stroke="#ffffff" stroke-width="4" paint-order="stroke">ACT</text>
+      <text x="330" y="126" text-anchor="middle" fill="#5b6270" font-size="12" stroke="#ffffff" stroke-width="4" paint-order="stroke">tool runs</text>
+
+      <rect x="470" y="80" width="150" height="60" rx="10" fill="#ffffff" stroke="#c9ced8" stroke-width="1.5"/>
+      <text x="545" y="106" text-anchor="middle" font-weight="700" fill="#20242c" stroke="#ffffff" stroke-width="4" paint-order="stroke">OBSERVE</text>
+      <text x="545" y="126" text-anchor="middle" fill="#5b6270" font-size="12" stroke="#ffffff" stroke-width="4" paint-order="stroke">result returns</text>
+
+      <line x1="190" y1="110" x2="253" y2="110" stroke="#2f5fb3" stroke-width="2" marker-end="url(#arr)"/>
+      <line x1="405" y1="110" x2="468" y2="110" stroke="#2f5fb3" stroke-width="2" marker-end="url(#arr)"/>
+      <path d="M545,140 C545,195 115,195 115,142" fill="none" stroke="#2f5fb3" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arr)"/>
+      <text x="330" y="200" text-anchor="middle" fill="#5b6270" font-size="12" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">…or the model says "done" and the loop exits with an answer</text>
+    </g>
+  </svg>
+  <figcaption>The whole idea in one picture: the model proposes, the harness disposes, the result goes back in.</figcaption>
+</figure>
+
+<div class="prose">
+<p>Every other property people attach to the word "agent" — planning, memory, using files, delegating to other agents — is an elaboration of this loop. It is also why agents are <em>risky</em> in a way chatbots are not: a chatbot can only be wrong, an agent can be wrong <em>with consequences</em>. Everything in this repo's design follows from respecting that difference.</p>
+</div>
+
+<h2>2. What makes an agent "deep"</h2>
+
+<div class="prose">
+<p>The SDK this repo pins — LangChain's <code>deepagents</code> for TypeScript — ships a reference agent that is more than the bare loop. The extra machinery lives in <strong>middleware</strong>: layers that sit around the model call and around tool execution, intercepting what goes in and what comes out. The default stack, as composed by <code>createDeepAgent</code>:</p>
+</div>
+
+<figure>
+  <svg width="680" height="300" viewBox="0 0 680 300" role="img" aria-label="The deep agent middleware stack">
+    <defs>
+      <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#2f5fb3"/>
+      </marker>
+    </defs>
+    <g font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13">
+      <rect x="20" y="20" width="640" height="46" rx="9" fill="#ffffff" stroke="#c9ced8" stroke-width="1.5"/>
+      <text x="340" y="40" text-anchor="middle" font-weight="700" fill="#20242c" stroke="#ffffff" stroke-width="4" paint-order="stroke">TodoListMiddleware</text>
+      <text x="340" y="57" text-anchor="middle" fill="#5b6270" font-size="11.5" stroke="#ffffff" stroke-width="4" paint-order="stroke">gives the agent a plan it can write down and update</text>
+
+      <rect x="40" y="76" width="600" height="46" rx="9" fill="#ffffff" stroke="#c9ced8" stroke-width="1.5"/>
+      <text x="340" y="96" text-anchor="middle" font-weight="700" fill="#20242c" stroke="#ffffff" stroke-width="4" paint-order="stroke">FilesystemMiddleware</text>
+      <text x="340" y="113" text-anchor="middle" fill="#5b6270" font-size="11.5" stroke="#ffffff" stroke-width="4" paint-order="stroke">ls · read_file · write_file · edit_file · glob · grep — behind a jailed backend</text>
+
+      <rect x="60" y="132" width="560" height="46" rx="9" fill="#ffffff" stroke="#c9ced8" stroke-width="1.5"/>
+      <text x="340" y="152" text-anchor="middle" font-weight="700" fill="#20242c" stroke="#ffffff" stroke-width="4" paint-order="stroke">SummarizationMiddleware</text>
+      <text x="340" y="169" text-anchor="middle" fill="#5b6270" font-size="11.5" stroke="#ffffff" stroke-width="4" paint-order="stroke">keeps recent messages verbatim, compresses older history</text>
+
+      <rect x="80" y="188" width="520" height="46" rx="9" fill="#ffffff" stroke="#c9ced8" stroke-width="1.5"/>
+      <text x="340" y="208" text-anchor="middle" font-weight="700" fill="#20242c" stroke="#ffffff" stroke-width="4" paint-order="stroke">PatchToolCallsMiddleware</text>
+      <text x="340" y="225" text-anchor="middle" fill="#5b6270" font-size="11.5" stroke="#ffffff" stroke-width="4" paint-order="stroke">repairs malformed tool calls instead of crashing the turn</text>
+
+      <rect x="100" y="244" width="480" height="46" rx="9" fill="#eaf1fb" stroke="#2f5fb3" stroke-width="1.5"/>
+      <text x="340" y="264" text-anchor="middle" font-weight="700" fill="#2f5fb3" stroke="#eaf1fb" stroke-width="4" paint-order="stroke">THE MODEL — and its tools node</text>
+      <text x="340" y="281" text-anchor="middle" fill="#5b6270" font-size="11.5" stroke="#eaf1fb" stroke-width="4" paint-order="stroke">the think → act → observe loop from §1</text>
+
+      <line x1="340" y1="66" x2="340" y2="74" stroke="#2f5fb3" stroke-width="2" marker-end="url(#arr2)"/>
+      <line x1="340" y1="122" x2="340" y2="130" stroke="#2f5fb3" stroke-width="2" marker-end="url(#arr2)"/>
+      <line x1="340" y1="178" x2="340" y2="186" stroke="#2f5fb3" stroke-width="2" marker-end="url(#arr2)"/>
+      <line x1="340" y1="234" x2="340" y2="242" stroke="#2f5fb3" stroke-width="2" marker-end="url(#arr2)"/>
+    </g>
+  </svg>
+  <figcaption>A "deep" agent is the loop plus this stack: planning, a jailed filesystem, bounded memory, and fault repair.</figcaption>
+</figure>
+
+<div class="prose">
+<p>Two properties of this stack matter for understanding the rest of the repo. First, middleware is <em>replaceable by name</em>: passing a middleware named <code>FilesystemMiddleware</code> into <code>createDeepAgent</code> swaps the default for yours — the mechanism this repo uses to give each agent its own tool allowlist. Second, the filesystem tools are only as safe as their <em>backend</em>: here every agent's backend is one shared directory in <code>virtualMode</code>, so <code>..</code> and absolute-path escapes are rejected by the backend itself, not by anyone's good behavior.</p>
+</div>
+
+<h2>3. Anatomy: one agent, as configured in this repo</h2>
+
+<div class="prose">
+<p>Every agent in Agent Room is born in <code>createRoomAgent</code>, the factory that translates a plain config object into the SDK call. Stripped to its skeleton, this is what an agent <em>is</em> here:</p>
+</div>
+
+<pre>const agent = createDeepAgent({
+  model: config.model,          <span class="c">// a provider string, or a stub model in tests</span>
+  systemPrompt: config.systemPrompt, <span class="c">// the persona — identity AND chattiness policy</span>
+  tools: config.tools,          <span class="c">// extras beyond the built-ins (e.g. fetch_url)</span>
+  backend: config.backend,      <span class="c">// the shared, jailed workspace directory</span>
+  checkpointer,                 <span class="c">// SqliteSaver — one DB file per agent</span>
+  permissions: config.permissions,
+  middleware,                   <span class="c">// tool allowlist + memory overrides</span>
+  name: config.name,
+});</pre>
+
+<p class="annot">Each field is a load-bearing decision: the persona text carries the "speak up only when the topic is squarely yours" restraint; the tool allowlist never includes <code>execute</code> (no shell in v1); the checkpointer path is derived from the agent's id, so a relaunched app rebuilds the agent against its old memory.</p>
+
+<div class="callout">
+  <span class="label">Key concept</span>
+  An agent's <strong>identity</strong> (id, roster record, checkpoint file) is durable; its <strong>instance</strong> (the live object with middleware wired in) is disposable. Editing an agent stores new config and recreates the instance at the next turn boundary. Removing one deletes neither its messages nor its memory file.
+</div>
+
+<h2>4. A turn, end to end</h2>
+
+<div class="prose">
+<p>What actually happens when you type <code>@Scout why is the parser slow?</code> and hit Enter. The numbered flow below is the real path through the code; the diagram carries a concrete example.</p>
+</div>
+
+<div class="prose">
+<ol>
+  <li>The renderer sends one intent over IPC: <code>postMessage(text)</code>. It knows nothing about agents.</li>
+  <li>The <strong>broker</strong> appends the message to the room store (seq #12, say) and routes it: the @mention targets exactly one agent; everyone else just has it noted for later replay.</li>
+  <li>The broker builds the agent's input — the <strong>room-context envelope</strong>: the roster (names + one-line personas) plus author-attributed messages, with anything the agent missed while busy marked as such. This is how Scout can tell you from Muse from itself.</li>
+  <li>The <strong>turn runner</strong> invokes the agent's graph with <code>streamMode: ["updates", "messages"]</code> and <code>subgraphs: true</code>, and maps raw stream chunks onto a small event vocabulary: <code>token</code>, <code>tool_call.start</code>, <code>tool_call.end</code>, <code>status</code>, <code>turn.end</code>.</li>
+  <li>Those events fan out to <strong>three independent projections</strong>: tokens are buffered into the reply text; the presence machine flips states; every event is appended to the store's event log, which the activity rail folds into tool cards.</li>
+  <li>On <code>turn.end(done)</code>, the reply becomes a room message — and if it @mentions another member, the chain continues, capped at depth 3 per user message.</li>
+</ol>
+</div>
+
+<figure>
+  <svg width="700" height="330" viewBox="0 0 700 330" role="img" aria-label="Sequence of one agent turn through the system">
+    <defs>
+      <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#2f5fb3"/>
+      </marker>
+    </defs>
+    <g font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="12.5">
+      <g fill="#20242c" font-weight="700">
+        <text x="60" y="24" text-anchor="middle" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">You</text>
+        <text x="205" y="24" text-anchor="middle" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">Broker</text>
+        <text x="350" y="24" text-anchor="middle" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">Room store</text>
+        <text x="495" y="24" text-anchor="middle" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">Turn runner</text>
+        <text x="630" y="24" text-anchor="middle" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">Scout</text>
+      </g>
+      <g stroke="#c9ced8" stroke-dasharray="3 3">
+        <line x1="60" y1="32" x2="60" y2="320"/>
+        <line x1="205" y1="32" x2="205" y2="320"/>
+        <line x1="350" y1="32" x2="350" y2="320"/>
+        <line x1="495" y1="32" x2="495" y2="320"/>
+        <line x1="630" y1="32" x2="630" y2="320"/>
+      </g>
+      <g fill="#3d4452">
+        <line x1="60" y1="52" x2="203" y2="52" stroke="#2f5fb3" stroke-width="1.8" marker-end="url(#arr3)"/>
+        <text x="70" y="46" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">"@Scout why is the parser slow?"</text>
+
+        <line x1="205" y1="82" x2="348" y2="82" stroke="#2f5fb3" stroke-width="1.8" marker-end="url(#arr3)"/>
+        <text x="215" y="76" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">append message (seq #12)</text>
+
+        <line x1="205" y1="112" x2="493" y2="112" stroke="#2f5fb3" stroke-width="1.8" marker-end="url(#arr3)"/>
+        <text x="215" y="106" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">envelope: roster + attributed history</text>
+
+        <line x1="495" y1="142" x2="628" y2="142" stroke="#2f5fb3" stroke-width="1.8" marker-end="url(#arr3)"/>
+        <text x="505" y="136" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">stream(input)</text>
+
+        <line x1="630" y1="172" x2="497" y2="172" stroke="#5b6270" stroke-width="1.8" stroke-dasharray="5 3" marker-end="url(#arr3)"/>
+        <text x="512" y="166" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">token: "Let me check…"</text>
+
+        <line x1="630" y1="202" x2="497" y2="202" stroke="#5b6270" stroke-width="1.8" stroke-dasharray="5 3" marker-end="url(#arr3)"/>
+        <text x="512" y="196" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">tool_call.start: grep(pattern: "parse")</text>
+
+        <line x1="630" y1="232" x2="497" y2="232" stroke="#5b6270" stroke-width="1.8" stroke-dasharray="5 3" marker-end="url(#arr3)"/>
+        <text x="512" y="226" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">tool_call.end ✓ · turn.end(done)</text>
+
+        <line x1="205" y1="262" x2="348" y2="262" stroke="#2f5fb3" stroke-width="1.8" marker-end="url(#arr3)"/>
+        <text x="215" y="256" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">append reply + every raw event</text>
+
+        <line x1="205" y1="292" x2="62" y2="292" stroke="#2f5fb3" stroke-width="1.8" marker-end="url(#arr3)"/>
+        <text x="70" y="286" stroke="#fdfcfa" stroke-width="4" paint-order="stroke">reply + presence + rail cards (pushed)</text>
+      </g>
+    </g>
+  </svg>
+  <figcaption>One mention, end to end. Notice what the renderer never sees: the envelope, the graph, the checkpoint. It sees events.</figcaption>
+</figure>
+
+<h2>5. Presence is a state machine, not a vibe</h2>
+
+<div class="prose">
+<p>How does the UI know Scout is "running search_web…"? Not by watching tokens — an agent can work for a minute without emitting one. Presence is a small deterministic machine in the SessionManager, fed by the turn runner's structured events. The member list is a pure rendering of it:</p>
+</div>
+
+<div class="strip">
+  <span class="state">connecting</span> <span class="arrow">→</span>
+  <span class="state">idle</span> <span class="arrow">→</span>
+  <span class="state hot">thinking</span> <span class="arrow">→</span>
+  <span class="state hot">runningTool</span> <span class="arrow">→</span>
+  <span class="state hot">thinking</span> <span class="arrow">→</span>
+  <span class="state">idle</span>
+</div>
+<div class="strip">
+  <span class="state hot">thinking / runningTool</span> <span class="arrow">→</span>
+  <span class="state err">error</span> <span class="arrow">→</span>
+  <span class="state">idle (retry)</span>
+  <span style="margin: 0 12px; color: var(--muted)">·</span>
+  <span class="state err">offline</span> <span class="arrow">→</span>
+  <span class="state">connecting (manual retry)</span>
+</div>
+
+<div class="prose">
+<p>Two invariants make this trustworthy. Transitions come <em>only</em> from events — <code>tool_call.start</code> moves an agent to <code>runningTool</code> and records the tool's name, which is exactly where the "running search_web…" line comes from. And the failure policy has no loops: one automatic recovery after a crash, then the agent goes <code>offline</code> and waits for a human to press Retry. Auth failures skip even that — a bad key never fixes itself.</p>
+</div>
+
+<h2>6. Cancellation and time</h2>
+
+<div class="prose">
+<p>Every turn carries an <code>AbortController</code>. Pressing Stop (or quitting the app) aborts it, and three things happen in order: the stream closes with <code>turn.end(cancelled)</code>; any partial reply is kept in the room history with an <em>interrupted</em> marker; and the agent's delivery watermark <em>stays put</em>. That last one is the subtle part — the watermark tracks what the agent has been shown, so nothing is marked delivered, and the messages come back as input on its next invocation. The human's record stays truthful while the agent's view stays conservative. A turn that outlives a wall-clock timeout is treated as a hang and follows the crash path rather than reading as a clean cancel.</p>
+</div>
+
+<h2>7. Memory: one truth, many recollections</h2>
+
+<div class="prose">
+<p>The room store holds the verbatim record of everything — it is the single source of truth. Each agent's memory is a <em>derived view</em> of it, and it is allowed to differ. Three mechanisms compose that view:</p>
+<ul>
+  <li><strong>Checkpoint.</strong> Each agent has a stable thread id and its own SQLite checkpoint file. A relaunched app rebuilds the agent against the same file, so the model wakes up with its working state intact.</li>
+  <li><strong>Replay.</strong> A per-agent watermark in the store tracks what that agent has been delivered. Anything it missed — while busy, offline, or removed — is folded into its next invocation's input, marked as missed.</li>
+  <li><strong>Summarization.</strong> Inside the checkpoint, the summarization middleware keeps recent messages verbatim and compresses older ones, so context stays bounded over a long room history.</li>
+</ul>
+</div>
+
+<div class="callout">
+  <span class="label">Edge case worth knowing</span>
+  Because summarization is per-agent, two agents can honestly "remember" the same week differently. That is a feature of the design, not a bug: the room's verbatim record is the arbiter when it matters, and each agent's recall is just its working memory of it.
+</div>
+
+<h2>8. The boundaries an agent here cannot cross</h2>
+
+<div class="prose">
+<p>The v1 posture is full autonomy <em>within a constrained surface</em>. There is no approval UI; the safety lives in what does not exist:</p>
+<ul>
+  <li><strong>No shell.</strong> <code>execute</code> is never in the tool catalog, and validation rejects it. A Coder agent works through files and asks <em>you</em> in-room to run builds and tests — co-presence supplies the execution loop.</li>
+  <li><strong>A jailed filesystem.</strong> Every file tool runs against one shared directory in virtual mode; traversal outside it is rejected by the backend, so the worst case is redo-able work in a sandbox.</li>
+  <li><strong>Bounded conversation.</strong> Agent→agent mention chains cap at depth 3 per user message, self-mentions are dropped, and an agent's own messages never re-trigger it. The room caps at 8 agents.</li>
+</ul>
+<p>The one-line summary of the whole design: <strong>the model proposes, the harness disposes, the store remembers, and the jail holds.</strong></p>
+</div>
+
+<footer>Composed 2026-07-24 by ce-explain</footer>
+
+</div>
+</body>
+</html>
