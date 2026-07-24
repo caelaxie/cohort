@@ -10,8 +10,11 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "postinstall": "electron-rebuild -f -w better-sqlite3 -o @langchain/langgraph-checkpoint-sqlite",
-    "smoke": "vitest run src/smoke"
+    "postinstall": "electron-rebuild -f -w better-sqlite3",
+    "smoke": "vitest run src/smoke",
+    "predev": "electron-rebuild -w better-sqlite3",
+    "pretest": "npm rebuild better-sqlite3",
+    "presmoke": "npm rebuild better-sqlite3"
   },
   "dependencies": {
     "@langchain/anthropic": "^1.5.1",
