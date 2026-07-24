@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Explaining the Agent Room UI — U6–U8</title>
+<style>
+  :root {
+    --ink: #1d2129;
+    --muted: #5c6472;
+    --accent: #2f5fb3;
+    --accent-soft: #eaf1fb;
+    --paper: #fdfcfa;
+    --card: #ffffff;
+    --line: #e3e0d8;
+    --ok: #1e7e46;
+    --ok-soft: #e8f5ec;
+    --warn: #9a6a00;
+    --warn-soft: #fdf3d8;
+    --bad: #b3261e;
+    --bad-soft: #fdecea;
+    --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-size: 18px;
+    line-height: 1.65;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 32px 20px 96px; }
+  h1, h2, h3 { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; line-height: 1.25; }
+  h1 { font-size: 2rem; margin-bottom: 0.2em; }
+  h2 { font-size: 1.5rem; margin-top: 2.2em; border-bottom: 2px solid var(--line); padding-bottom: 0.3em; }
+  h3 { font-size: 1.15rem; margin-top: 1.8em; }
+  p.subtitle { color: var(--muted); font-size: 1.05rem; margin-top: 0; }
+  a { color: var(--accent); }
+  code { font-family: var(--mono); font-size: 0.85em; background: #f1efe9; padding: 1px 5px; border-radius: 4px; }
+  pre {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    line-height: 1.5;
+    background: #22252c;
+    color: #e8ecf4;
+    padding: 16px 18px;
+    border-radius: 10px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+  }
+  pre .c { color: #8b93a7; }
+  pre .k { color: #6ea8fe; }
+  pre .s { color: #7fd99a; }
+
+  /* Table of contents */
+  nav.toc {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px 22px;
+    margin: 28px 0 8px;
+    font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+    font-size: 0.95rem;
+  }
+  nav.toc strong { display: block; margin-bottom: 8px; letter-spacing: 0.04em; text-transform: uppercase; font-size: 0.8rem; color: var(--muted); }
+  nav.toc ol { margin: 0; padding-left: 22px; }
+  nav.toc li { margin: 4px 0; }
+  nav.toc a { text-decoration: none; }
+  nav.toc a:hover { text-decoration: underline; }
+
+  /* Callouts */
+  .callout {
+    border-left: 4px solid var(--accent);
+    background: var(--accent-soft);
+    border-radius: 0 10px 10px 0;
+    padding: 14px 18px;
+    margin: 22px 0;
+  }
+  .callout .label { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); display: block; margin-bottom: 4px; }
+  .callout.edge { border-color: var(--warn); background: var(--warn-soft); }
+  .callout.edge .label { color: var(--warn); }
+  .callout.bug { border-color: var(--bad); background: var(--bad-soft); }
+  .callout.bug .label { color: var(--bad); }
+
+  /* Diagram system */
+  .diagram {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 20px;
+    margin: 24px 0;
+    font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+  }
+  .diagram .caption { font-size: 0.85rem; color: var(--muted); margin-top: 14px; text-align: center; }
+  .lane { border: 1.5px solid var(--line); border-radius: 10px; padding: 12px 14px; background: #fbfaf7; }
+  .lane h4 { margin: 0 0 8px; font-size: 0.85rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+  .box { background: #fff; border: 1.5px solid #c9ced8; border-radius: 8px; padding: 8px 12px; font-size: 0.85rem; margin: 6px 0; }
+  .box b { display: block; font-size: 0.9rem; }
+  .box .ex { color: var(--muted); font-size: 0.78rem; font-family: var(--mono); }
+  .cols { display: flex; gap: 14px; align-items: stretch; }
+  .cols > * { flex: 1; }
+  .arrow { text-align: center; color: var(--accent); font-size: 1.3rem; line-height: 1; margin: 4px 0; }
+  .arrow-v { display: flex; flex-direction: column; justify-content: center; color: var(--accent); font-size: 1.4rem; padding: 0 2px; }
+  .pill { display: inline-block; border-radius: 999px; padding: 2px 10px; font-size: 0.75rem; font-weight: 600; }
+  .pill.running { background: #dfe9fd; color: #2f5fb3; }
+  .pill.done { background: var(--ok-soft); color: var(--ok); }
+  .pill.interrupted { background: var(--warn-soft); color: var(--warn); }
+  .pill.error { background: var(--bad-soft); color: var(--bad); }
+
+  /* Event log */
+  .evt { display: flex; gap: 10px; align-items: baseline; font-family: var(--mono); font-size: 0.78rem; padding: 5px 8px; border-bottom: 1px dashed var(--line); }
+  .evt:last-child { border-bottom: none; }
+  .evt .seq { color: var(--muted); width: 34px; text-align: right; flex-shrink: 0; }
+  .evt .kind { font-weight: 700; width: 130px; flex-shrink: 0; }
+  .evt .data { color: #3d4452; }
+
+  /* UI sketch */
+  .uisketch { border: 2px solid #333; border-radius: 10px; overflow: hidden; background: #fff; }
+  .uisketch .titlebar { background: #333; color: #fff; font-size: 0.75rem; padding: 5px 12px; }
+  .uisketch .body { display: flex; min-height: 210px; }
+  .uisketch .members { width: 150px; border-right: 1px solid var(--line); padding: 10px; font-size: 0.75rem; background: #f7f6f2; }
+  .uisketch .chat { flex: 1; padding: 10px; font-size: 0.75rem; }
+  .uisketch .rail { width: 190px; border-left: 1px solid var(--line); padding: 10px; font-size: 0.75rem; background: #f7f6f2; }
+  .uisketch .who { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; }
+  .dot.busy { background: var(--accent); }
+  .bubble { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; margin-bottom: 8px; background: #fff; }
+  .bubble.agent { background: #f2f4f8; }
+  .bubble.sys { background: transparent; border-style: dashed; color: var(--muted); }
+  .toolcard { border: 1px solid #c9ced8; border-radius: 6px; padding: 5px 7px; margin-bottom: 6px; background: #fff; font-size: 0.72rem; }
+  .toolcard .row { display: flex; gap: 6px; align-items: center; }
+
+  /* Quiz */
+  .quiz-q { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px; margin: 18px 0; font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; }
+  .quiz-q h4 { margin: 0 0 10px; font-size: 1rem; }
+  .quiz-q button.opt { display: block; width: 100%; text-align: left; margin: 6px 0; padding: 10px 14px; border: 1.5px solid #c9ced8; border-radius: 8px; background: #fff; font-size: 0.9rem; cursor: pointer; font-family: inherit; }
+  .quiz-q button.opt:hover { border-color: var(--accent); }
+  .quiz-q button.opt.correct { border-color: var(--ok); background: var(--ok-soft); }
+  .quiz-q button.opt.wrong { border-color: var(--bad); background: var(--bad-soft); }
+  .quiz-q .fb { display: none; font-size: 0.88rem; margin-top: 8px; padding: 10px 14px; border-radius: 8px; }
+  .quiz-q .fb.show { display: block; }
+  .quiz-q .fb.ok { background: var(--ok-soft); color: var(--ok); }
+  .quiz-q .fb.no { background: var(--bad-soft); color: var(--bad); }
+  #score { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; font-weight: 700; margin-top: 20px; }
+
+  @media (max-width: 640px) {
+    body { font-size: 16px; }
+    .cols { flex-direction: column; }
+    .uisketch .body { flex-direction: column; }
+    .uisketch .members, .uisketch .rail { width: auto; border: none; border-bottom: 1px solid var(--line); }
+    .evt .kind { width: 100px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Making the Room Real</h1>
+<p class="subtitle">An explanation of the Agent Room UI change set — units U6, U7, and U8 on branch <code>setup-project</code>, plus the smoke gate and review fixes (<code>ab72088..a8f9bf8</code>, 12 commits, ~8,000 lines).</p>
+
+<nav class="toc">
+  <strong>Contents</strong>
+  <ol>
+    <li><a href="#background">Background: the room beneath the glass</a></li>
+    <li><a href="#narrow">Narrow background: what existed when this work began</a></li>
+    <li><a href="#intuition">Intuition: three ideas that carry the whole diff</a></li>
+    <li><a href="#code">Code: a guided walkthrough</a></li>
+    <li><a href="#bugs">The two bugs found in review</a></li>
+    <li><a href="#quiz">Quiz: did it stick?</a></li>
+  </ol>
+</nav>
+
+<h2 id="background">1. Background: the room beneath the glass</h2>
+
+<p>Agent Room is a desktop application with a simple conceit: one persistent chat room in which you and a small team of AI agents are <em>co-present members</em>. You can @mention an agent to direct work at it, agents may chime in unaddressed when a message is squarely in their domain, and each agent has its own long-term memory of the room's history. It is an Electron app, which means its architecture lives or dies by one fundamental boundary.</p>
+
+<h3>The Electron boundary, for newcomers</h3>
+
+<p>Every Electron app is really two programs stapled together. The <strong>main process</strong> is a Node.js process: it can read files, open databases, and hold long-lived state. The <strong>renderer</strong> is a Chromium browser window: it runs React, paints pixels, and is deliberately kept away from the filesystem and the network. Between them sits a narrow bridge: a <em>preload</em> script that exposes a hand-picked set of functions over Electron's IPC (inter-process communication) channels.</p>
+
+<p>This boundary is not a nuisance to be worked around — it is the security model and the mental model. The rule this codebase follows is worth stating plainly, because almost every file in this diff is shaped by it:</p>
+
+<div class="callout">
+  <span class="label">Key concept</span>
+  The renderer is a <strong>pure view</strong>. It holds no source of truth, makes no routing decisions, and never touches the model APIs. It sends <em>intents</em> ("post this message", "cancel that turn", "create an agent") and renders whatever the main process pushes back.
+</div>
+
+<h3>The cast of characters in the main process</h3>
+
+<p>Four main-process objects matter for this story, and they were all built in earlier units (U1–U5):</p>
+
+<div class="diagram">
+  <div class="lane">
+    <h4>Main process (Node)</h4>
+    <div class="box"><b>SessionManager</b> owns one <code>createDeepAgent</code> instance per agent — a LangChain "deep agent" (an LLM with tools, middleware, and memory). It runs a presence state machine per agent: <span class="pill running">connecting</span> <span class="pill done">idle</span> <span class="pill running">thinking</span> <span class="pill running">runningTool</span> <span class="pill error">error / offline</span>. It also owns per-turn <code>AbortController</code> cancellation.</div>
+    <div class="box"><b>Broker</b> decides <em>who speaks when</em>. It routes @mentions, runs the chime-in relevance gate for unaddressed messages, keeps a per-agent FIFO queue, and caps agent→agent chains at depth 3 so two agents can't talk themselves into a loop.</div>
+    <div class="box"><b>RoomStore</b> a SQLite database that is the <em>source of truth</em>: every message, the agent roster, and — crucially for U7 — an append-only <strong>event log</strong> of raw turn events.</div>
+    <div class="box"><b>Turn runner</b> executes one agent turn and maps the LangGraph stream onto a small room-event vocabulary: <code>token</code>, <code>tool_call.start</code>, <code>tool_call.end</code>, <code>status</code>, <code>turn.end</code>.</div>
+  </div>
+  <p class="caption">The main process as it stood after U5. All of it worked — but you could only drive it from tests.</p>
+</div>
+
+<h3>Memory and the workspace</h3>
+
+<p>Two more pieces of context complete the picture. First, each agent's <em>memory</em> is a SQLite LangGraph checkpoint (one file per agent) plus a summarization middleware: recent messages stay verbatim, older history is summarized. Second, all agents share one <em>workspace directory</em>, jailed by the SDK's filesystem backend in <code>virtualMode</code> — path traversal is rejected at the backend, not by convention. There is deliberately no shell tool anywhere in the product.</p>
+
+<h2 id="narrow">2. Narrow background: what existed when this work began</h2>
+
+<p>After U5, the room was a brain without a face. Agents could be created <em>in code</em>, invoked through the broker, and they remembered things across restarts. But there was no window to look at, no way to make an agent without writing TypeScript, and when an agent went off to do work you had no idea what it was doing unless you read the raw event table by hand.</p>
+
+<p>The plan assigned the face three units, which this diff delivers:</p>
+
+<ul>
+  <li><strong>U6 — the room surface:</strong> conversation, member list with live presence, and a composer, all over a new IPC layer.</li>
+  <li><strong>U7 — the activity rail:</strong> a per-agent "what is everyone doing" view that never requires reading scrollback.</li>
+  <li><strong>U8 — the builder:</strong> create, edit, and remove agents in-app, with starter presets and a settings pane for API keys.</li>
+</ul>
+
+<p>Plus two things the plan's verification contract demanded: an end-to-end <strong>smoke gate</strong> (<code>npm run smoke</code>) and the unglamorous work of making the whole thing actually launch (which, as we'll see in §5, was harder than it sounds).</p>
+
+<h2 id="intuition">3. Intuition: three ideas that carry the whole diff</h2>
+
+<p>If you take three ideas away from this change set, everything else is elaboration.</p>
+
+<h3>Idea 1: The renderer speaks in DTOs and events, never in objects</h3>
+
+<p>Because the renderer is a pure view, the entire relationship between the two processes can be written down as one TypeScript file: <code>src/shared/room-types.ts</code>. It declares the data the renderer is allowed to see (a <code>RoomSnapshot</code> of messages and members), the live events it may receive (<code>RoomPushEvent</code>), and the intents it may send (the <code>RoomClient</code> interface). The preload script implements that interface over IPC; in tests, a <code>FakeClient</code> implements it in-memory, so every React component is testable without Electron at all.</p>
+
+<div class="diagram">
+  <div class="cols">
+    <div class="lane">
+      <h4>Renderer (Chromium)</h4>
+      <div class="box"><b>React components</b><span class="ex">Room, ActivityRail, AgentBuilder</span></div>
+      <div class="box"><b>useRoomState / useActivityState</b><span class="ex">hydrate once, then fold push events</span></div>
+    </div>
+    <div class="arrow-v">⇄</div>
+    <div class="lane">
+      <h4>Preload bridge</h4>
+      <div class="box"><b>window.agentRoom.room</b><span class="ex">getSnapshot() · postMessage()<br>cancelTurn() · createAgent()<br>subscribe(listener)</span></div>
+    </div>
+    <div class="arrow-v">⇄</div>
+    <div class="lane">
+      <h4>Main process</h4>
+      <div class="box"><b>RoomHost façade</b><span class="ex">store + sessions + broker + projector</span></div>
+      <div class="box"><b>IPC handlers</b><span class="ex">room:get-snapshot · agents:create …</span></div>
+    </div>
+  </div>
+  <p class="caption">Everything the UI knows crosses one typed seam. The same seam is faked in tests, which is why 123 tests run without a window.</p>
+</div>
+
+<p>Notice the direction of fit. The renderer does not poll: it hydrates <em>once</em> from a snapshot, then applies a stream of small push events. This is the same shape as a database view kept current by a change feed — and it sets up the second idea.</p>
+
+<h3>Idea 2: The activity rail is a fold over an event log</h3>
+
+<p>The activity rail answers "what is Scout <em>doing</em> right now?" The naive design would have the UI watch token streams — but tokens are the wrong signal (an agent can think for a minute without emitting one). The right signal is the turn-event vocabulary the turn runner already emits. So the broker appends <em>every</em> raw turn event to the room store's event log, and a new main-process object — the <strong>ActivityProjector</strong> — folds that log into per-agent activity state.</p>
+
+<p>"Fold" is the operative word. The projector is a pure function from <em>sequence of events</em> to <em>current view</em>:</p>
+
+<div class="diagram">
+  <div class="cols">
+    <div class="lane">
+      <h4>Event log (SQLite, append-only)</h4>
+      <div class="evt"><span class="seq">41</span><span class="kind">turn.begin</span><span class="data">{triggerSeqs: [12]}</span></div>
+      <div class="evt"><span class="seq">42</span><span class="kind">tool_call.start</span><span class="data">search_web {q: "parser perf"}</span></div>
+      <div class="evt"><span class="seq">43</span><span class="kind">token</span><span class="data">"Let me"</span></div>
+      <div class="evt"><span class="seq">44</span><span class="kind">tool_call.start</span><span class="data">write_file {file_path: "notes.md"}</span></div>
+      <div class="evt"><span class="seq">45</span><span class="kind">tool_call.end</span><span class="data">write_file ✓ 120ms</span></div>
+      <div class="evt"><span class="seq">46</span><span class="kind">tool_call.end</span><span class="data">search_web ✓ 380ms</span></div>
+      <div class="evt"><span class="seq">47</span><span class="kind">turn.end</span><span class="data">{reason: "done"}</span></div>
+    </div>
+    <div class="arrow-v">⟶</div>
+    <div class="lane">
+      <h4>Projected view (per agent)</h4>
+      <div class="toolcard">
+        <div class="row"><span class="pill done">done</span> <b>search_web</b> <span style="margin-left:auto">380ms</span></div>
+      </div>
+      <div class="toolcard">
+        <div class="row"><span class="pill done">done</span> <b>write_file</b> <span style="margin-left:auto">120ms</span></div>
+      </div>
+      <div class="box"><b>produced</b><span class="ex">notes.md</span></div>
+      <div class="box">turn outcome: <span class="pill done">done</span> · from msg <b>#12</b></div>
+    </div>
+  </div>
+  <p class="caption">State = fold(events). Tokens are folded for liveness only — they never trigger a push to the renderer.</p>
+</div>
+
+<p>Because the log is persisted, the fold is <em>reproducible</em>. A reloaded renderer doesn't need a snapshot format of its own: it asks for the roster-complete snapshot (which carries a <strong>high-water mark</strong> — the highest event sequence number folded so far) and then simply ignores any live push whose <code>eventSeq</code> is at or below that mark. Catch-up without duplicates falls out of the design for free.</p>
+
+<div class="callout">
+  <span class="label">Why this is event sourcing in miniature</span>
+  The write side (broker appends) and the read side (projector folds) are separated by the log. The same events feed the token buffer that assembles the reply text, the presence machine, and now the rail — three independent projections of one truth. Adding a fourth view later costs a new fold function, not a new event protocol.
+</div>
+
+<h3>Idea 3: An agent is a replaceable instance behind a stable identity</h3>
+
+<p>U8 makes agents editable. The subtlety: a running agent is a live LLM instance with middleware and memory wired in, so you cannot mutate its persona mid-flight. The resolution is to treat the instance as <em>disposable</em> and the identity (id, roster record, checkpoint file) as <em>durable</em>:</p>
+
+<ul>
+  <li><strong>Edit</strong> writes the new config to the store, then asks the SessionManager to <code>reconfigure</code>: the in-flight turn finishes on the old instance, and the <em>next</em> turn runs on a freshly created one. Name and avatar changes apply to future messages; old messages keep the name and avatar captured when they were written (which is why the messages table grew an <code>avatar</code> column in this diff).</li>
+  <li><strong>Remove</strong> cancels any in-flight turn, writes an interruption marker and a system note, drops the agent from the roster — and leaves its messages and its checkpoint file on disk. History never rewrites attribution.</li>
+  <li><strong>Relaunch</strong> calls <code>restoreAgents()</code>: every roster record is re-registered and started against its old checkpoint, so agents come back online with their memories intact.</li>
+</ul>
+
+<div class="diagram">
+  <div class="cols">
+    <div class="lane">
+      <h4>Turn N (old config)</h4>
+      <div class="box"><b>instance #1</b><span class="ex">persona: "careful researcher"</span></div>
+      <div class="evt" style="border:none"><span class="kind">thinking…</span><span class="data">user clicks Save mid-turn</span></div>
+    </div>
+    <div class="arrow-v">⟶</div>
+    <div class="lane">
+      <h4>Turn N+1 (new config)</h4>
+      <div class="box"><b>instance #2</b><span class="ex">persona: "terse fact-checker"<br>memory: {trigger: 5, keep: 2}</span></div>
+      <div class="evt" style="border:none"><span class="kind">recreated</span><span class="data">only after turn N settled</span></div>
+    </div>
+  </div>
+  <p class="caption">reconfigure() defers the swap to the turn boundary. The room never sees a half-edited agent.</p>
+</div>
+
+<h2 id="code">4. Code: a guided walkthrough</h2>
+
+<p>The diff is large, but it organizes into six layers that stack on top of each other. We'll go bottom-up, from the shared vocabulary to the pixels, then look at the lifecycle wiring and the smoke gate.</p>
+
+<h3>4.1 The shared vocabulary — <code>src/shared/</code></h3>
+
+<p><code>room-types.ts</code> gained the rail DTOs (<code>ToolCallDto</code>, <code>TurnActivityDto</code>, <code>AgentActivityDto</code>), the builder DTOs (<code>AgentOptionsDto</code>, <code>SaveAgentResult</code>), an <code>avatar</code> on both members and messages, and five new <code>RoomClient</code> methods for the agent lifecycle. A new pure module, <code>agent-config.ts</code>, holds the catalog both sides validate against:</p>
+
+<pre>export const TOOL_CATALOG: readonly ToolSpec[] = [
+  { id: <span class="s">"read_file"</span>,  label: <span class="s">"Read files"</span>,  kind: <span class="s">"fs"</span> },
+  { id: <span class="s">"write_file"</span>, label: <span class="s">"Write files"</span>, kind: <span class="s">"fs"</span> },
+  { id: <span class="s">"edit_file"</span>,   label: <span class="s">"Edit files"</span>,   kind: <span class="s">"fs"</span> },
+  { id: <span class="s">"ls"</span>,          label: <span class="s">"List files"</span>,   kind: <span class="s">"fs"</span> },
+  { id: <span class="s">"glob"</span>,        label: <span class="s">"Find files"</span>,   kind: <span class="s">"fs"</span> },
+  { id: <span class="s">"grep"</span>,        label: <span class="s">"Search files"</span>, kind: <span class="s">"fs"</span> },
+  { id: <span class="s">"fetch_url"</span>,   label: <span class="s">"Fetch URL"</span>,    kind: <span class="s">"web"</span> },
+];
+<span class="c">// Note what is absent: "execute". No shell ships in v1 — the catalog</span>
+<span class="c">// is the enforcement point, and validation rejects anything outside it.</span></pre>
+
+<p>The same module defines the three presets — Researcher, Coder, Writer — whose personas carry the product's chattiness policy <em>as prose</em> ("You speak up only when the topic is squarely yours… otherwise you stay silent"). That was a deliberate product decision: there is no chattiness slider, the personality lives in the persona text, and the relevance gate uses that very text as its judging rubric (verified by a test that captures what the gate receives).</p>
+
+<h3>4.2 Main process, part 1 — the projector and the store</h3>
+
+<p>The room store learned two new tricks: an <code>avatar</code> column on messages (with an <code>ALTER TABLE</code> migration for older databases, same pattern as the earlier <code>interrupted</code> column), and <code>subscribeEvents</code> — the event-log equivalent of the existing message subscription. The projector consumes both the historic log and the live feed through one code path:</p>
+
+<pre>constructor(options: ActivityProjectorOptions) {
+  <span class="c">// 1. Fold everything that already happened…</span>
+  <span class="k">for</span> (const record of <span class="k">this</span>.store.listEvents()) {
+    <span class="k">this</span>.fold(record, <span class="k">false</span>);
+  }
+  <span class="c">// 2. …then keep folding as new events land.</span>
+  <span class="k">this</span>.unsubscribe = <span class="k">this</span>.store.subscribeEvents((record) =&gt; {
+    <span class="k">this</span>.fold(record, <span class="k">true</span>);
+  });
+}</pre>
+
+<p>The fold itself is a switch over event kinds. <code>tool_call.start</code> opens a card (nesting one level under the most recent open card when the event carries a subgraph namespace — that's how subagent steps attach to their parent). <code>tool_call.end</code> closes it and stamps the duration from event timestamps. <code>write_file</code>/<code>edit_file</code> starts contribute <em>produced items</em>, deduped by path. <code>turn.end</code> settles the turn, marking any still-open cards interrupted or errored depending on the outcome. Two details worth knowing:</p>
+
+<ul>
+  <li>Only turn-boundary and tool events <em>notify</em> listeners. Tokens and status events update a liveness timestamp silently — otherwise the renderer would receive one activity push per token, recreating the very thrash the streaming layer works to avoid.</li>
+  <li>DTOs are copied by value at the boundary (cards and children mapped), so a fold that happens <em>after</em> a push can never mutate the snapshot a listener already received.</li>
+</ul>
+
+<h3>4.3 Main process, part 2 — lifecycle surgery</h3>
+
+<p>The SessionManager gained the two operations the builder needs, each about twenty lines and each with a sharp edge case handled by the presence machine:</p>
+
+<pre>reconfigure(agentId, patch) {
+  s.config = { ...s.config, ...patch, id: s.id };
+  <span class="k">if</span> (s.activeTurn) {
+    s.pendingRecreate = <span class="k">true</span>;   <span class="c">// finish on the OLD config…</span>
+    <span class="k">return</span>;
+  }
+  <span class="k">void this</span>.recreateInstance(s);   <span class="c">// …idle? swap now.</span>
+}
+
+<span class="k">async</span> stopAgent(agentId) {
+  <span class="c">// cancel in-flight, resolve queued sends as cancelled,</span>
+  <span class="c">// await the turn loop, transition to stopped, unregister.</span>
+  <span class="c">// The checkpoint file is deliberately left on disk.</span>
+}</pre>
+
+<p>And the <code>RoomHost</code> façade grew the orchestration the IPC layer calls: <code>createAgent</code> (validate → slug id → roster record → register → start), <code>updateAgent</code> (validate → persist → reconfigure), <code>removeAgent</code> (cancel → stop → delete → system note), <code>restoreAgents</code> (re-register and start every stored agent on relaunch), and <code>getAgentOptions</code>/<code>getAgentConfig</code> for the builder's form state.</p>
+
+<p>The broker got smaller, sharper changes: it logs a <code>turn.begin</code> marker at dispatch (which chat messages spawned this work — that's how rail cards link back to the conversation), stamps avatars onto agent messages at write time, and generates turn ids with a per-boot prefix so ids never collide across app restarts.</p>
+
+<h3>4.4 The bridge — <code>ipc.ts</code> and <code>preload/index.ts</code></h3>
+
+<p>Five new IPC channels (<code>agents:get-options</code>, <code>agents:get-config</code>, <code>agents:create</code>, <code>agents:update</code>, <code>agents:remove</code>) plus <code>activity:get-snapshot</code>. Every handler re-validates on the main side — the renderer's inline validation is a courtesy, never a boundary. The preload maps each channel onto the <code>RoomClient</code> interface one-to-one; there is no cleverness here, which is exactly the point of a security seam.</p>
+
+<h3>4.5 The renderer — room, rail, builder</h3>
+
+<p>The room UI (U6) renders from <code>useRoomState</code>: messages hydrate once, streaming tokens buffer per agent and flush once per animation frame, presence dots come from session events and <em>never</em> from token arrival. The composer has a @mention autocomplete, keeps drafts on failed sends, and stays disabled until at least one agent exists — the first-run empty state routes you into the builder instead.</p>
+
+<div class="diagram">
+  <div class="uisketch">
+    <div class="titlebar">Agent Room</div>
+    <div class="body">
+      <div class="members">
+        <div class="who"><span class="dot busy"></span> <b>Scout</b></div>
+        <div style="color:var(--muted)">running search_web…</div>
+        <div class="who" style="margin-top:10px"><span class="dot"></span> <b>Muse</b></div>
+        <div style="color:var(--muted)">idle</div>
+        <div class="who" style="margin-top:10px"><span class="dot"></span> <b>You</b></div>
+      </div>
+      <div class="chat">
+        <div class="bubble"><b>You</b> — @Scout why is the parser slow?</div>
+        <div class="bubble agent"><b>Scout</b> — Checking the hotspots now…</div>
+        <div class="bubble sys">Interrupted: Scout's turn was cancelled.</div>
+      </div>
+      <div class="rail">
+        <b>ACTIVITY</b>
+        <div class="toolcard" style="margin-top:8px">
+          <div class="row"><span class="pill running">running</span> <b>search_web</b> <span style="margin-left:auto">4.2s</span></div>
+          <div style="color:var(--muted)">args {q: "parser perf"}</div>
+        </div>
+        <div class="toolcard">
+          <div class="row"><span class="pill done">done</span> <b>write_file</b> <span style="margin-left:auto">120ms</span></div>
+        </div>
+        <div style="color:var(--ok)">produced: notes.md</div>
+      </div>
+    </div>
+  </div>
+  <p class="caption">The three panes and what drives them: member list ← presence machine; chat ← room store; rail ← projector fold.</p>
+</div>
+
+<p>The rail (U7) mirrors the projector's shape one-to-one: a section per agent, the live turn's cards with status chips and ticking durations, args/output truncated behind a toggle, subagent steps nested under their parent card, produced files listed in green, older turns collapsed behind an "earlier turns" disclosure, and an honest "idle — last active 5m ago" for quiet agents. A just-settled turn stays visible precisely so an <span class="pill interrupted">interrupted</span> chip is glanceable; only older turns fold away.</p>
+
+<p>The builder (U8) is a controlled form over the shared catalog: name, an emoji-and-color avatar picker, persona textarea, model dropdown, tool checkboxes, and an optional memory-overrides section. Inline errors come from the same <code>validateAgentConfig</code> the main process re-runs on save. The settings pane is deliberately tiny: one password field for the Anthropic key, stored via Electron's safeStorage.</p>
+
+<h3>4.6 The smoke gate — <code>src/smoke/smoke.test.ts</code></h3>
+
+<p>The plan's verification contract ends with an end-to-end gate: <code>npm run smoke</code>. It drives the real main-process stack on disk (a temp directory stands in for <code>userData</code>) through the entire demo path in one test:</p>
+
+<div class="diagram">
+  <div class="lane">
+    <h4>Run 1</h4>
+    <div class="evt"><span class="seq">1</span><span class="kind">launch</span><span class="data">room empty (first run)</span></div>
+    <div class="evt"><span class="seq">2</span><span class="kind">createAgent</span><span class="data">Researcher preset → "scout", presence idle</span></div>
+    <div class="evt"><span class="seq">3</span><span class="kind">@mention</span><span class="data">reply lands; rail shows write_file + produced findings.md</span></div>
+    <div class="evt"><span class="seq">4</span><span class="kind">quit mid-task</span><span class="data">turn cancelled, interruption marker written</span></div>
+  </div>
+  <div class="arrow">↓ same directory</div>
+  <div class="lane">
+    <h4>Run 2 (relaunch)</h4>
+    <div class="evt"><span class="seq">5</span><span class="kind">restoreAgents</span><span class="data">scout back online against scout.checkpoint.sqlite</span></div>
+    <div class="evt"><span class="seq">6</span><span class="kind">verify</span><span class="data">history + marker visible; rail replayed without duplicates</span></div>
+    <div class="evt"><span class="seq">7</span><span class="kind">@mention</span><span class="data">agent answers again</span></div>
+  </div>
+  <p class="caption">The smoke caught a real gap while being written: nothing re-registered stored agents on relaunch until <code>restoreAgents()</code> was added for it.</p>
+</div>
+
+<h2 id="bugs">5. The two bugs found in review</h2>
+
+<p>Two defects surfaced during the final review pass. Both are instructive because they are <em>boundary</em> bugs — places where two of the architecture's seams rubbed.</p>
+
+<div class="callout bug">
+  <span class="label">Bug 1 — the turn that never ended</span>
+  The broker logs <code>turn.begin</code> at dispatch, and the projector settles turns on <code>turn.end</code>. But when the target agent is offline, <code>sendTurn</code> returns an error <em>without ever running the turn runner</em> — so no <code>turn.end</code> is ever emitted, and the rail showed that turn as "working…" forever. The fix is six lines: on an error outcome, the broker appends a synthetic <code>turn.end</code> itself. When the runner already emitted one, the extra fold is a no-op — the projector's <code>settleTurn</code> ignores events for a turn that has already closed.
+</div>
+
+<div class="callout bug">
+  <span class="label">Bug 2 — one binary, two incompatible runtimes</span>
+  <code>better-sqlite3</code> is a native module, and native modules are compiled against a specific ABI. Electron 33 wants ABI 130; the system Node (which runs the tests) wants ABI 137. The original <code>postinstall</code> script was meant to rebuild it for Electron, but a misplaced <code>-o</code> flag had made it rebuild a pure-JS package instead — a silent no-op since the day it was written. The app crashed on launch; the tests were fine. The durable fix lives in <code>package.json</code>: <code>predev</code> rebuilds for Electron, <code>pretest</code>/<code>presmoke</code> rebuild for Node, and <code>postinstall</code> now uses the correct flags.
+</div>
+
+<p>There's a moral in the second one. A verification step that can't fail loudly ("Rebuild Complete" printed whether or not anything was rebuilt) hid the problem until someone tried to run the app. The smoke gate now exercises the launch path — but only an actual launch caught the ABI mismatch, which is why the final summary called out "not verified by eye" as a residual risk until the app was run.</p>
+
+<h2 id="quiz">6. Quiz: did it stick?</h2>
+
+<p>Five questions, medium heat. Click an answer to check it.</p>
+
+<div class="quiz-q" data-answer="b">
+  <h4>1. Why does the ActivityProjector fold events from the SQLite log instead of subscribing directly to the SessionManager's event stream?</h4>
+  <button class="opt" data-k="a">A. SQLite queries are faster than in-process pub/sub at this scale</button>
+  <button class="opt" data-k="b">B. The persisted log makes the projection reproducible — a reloaded renderer or restarted main process refolds the same events and catches up without a separate snapshot format or duplicate state</button>
+  <button class="opt" data-k="c">C. The SessionManager doesn't emit tool-call events, only presence changes</button>
+  <button class="opt" data-k="d">D. The broker requires all reads to go through the room store for authorization</button>
+  <div class="fb ok">Right — the log <em>is</em> the projector's persistence. Hydrate from a snapshot stamped with a high-water mark, then drop live pushes at or below it: catch-up with no duplicates, and no second snapshot format to keep in sync.</div>
+  <div class="fb no">Not quite. The key property is reproducibility: the same append-only log feeds every projection (reply assembly, presence, rail), so any consumer can refold from scratch and arrive at the same state.</div>
+</div>
+
+<div class="quiz-q" data-answer="c">
+  <h4>2. You edit Scout's persona and click Save <em>while Scout is mid-turn</em>. What happens?</h4>
+  <button class="opt" data-k="a">A. The turn is cancelled immediately and restarted with the new persona</button>
+  <button class="opt" data-k="b">B. The running instance's system prompt is mutated in place via <code>updateState</code></button>
+  <button class="opt" data-k="c">C. The current turn finishes on the old config; the instance is recreated at the turn boundary, and the next turn uses the new config</button>
+  <button class="opt" data-k="d">D. The save is rejected with a "busy" error until the turn completes</button>
+  <div class="fb ok">Correct — <code>reconfigure</code> stores the new config and sets <code>pendingRecreate</code>; when the turn settles, the instance is rebuilt and the queue is pumped. A half-edited agent never exists.</div>
+  <div class="fb no">No — instances are treated as disposable. The edit waits for the turn boundary, then the agent is recreated from the stored config. History and the checkpoint file carry over; only the live instance is swapped.</div>
+</div>
+
+<div class="quiz-q" data-answer="b">
+  <h4>3. A turn is cancelled mid-stream. What happens to the partial reply and the agent's delivery watermark?</h4>
+  <button class="opt" data-k="a">A. Both are discarded — the agent restarts the turn from scratch next time</button>
+  <button class="opt" data-k="b">B. The partial is kept in history with an "interrupted" marker, and the watermark stays put so undelivered triggers replay on the next invocation</button>
+  <button class="opt" data-k="c">C. The partial is kept and the watermark advances, so the agent never re-reads those messages</button>
+  <button class="opt" data-k="d">D. The partial is moved to the event log and the watermark rewinds to the previous turn</button>
+  <div class="fb ok">Right. The room record stays truthful (the partial exists, marked interrupted), while the agent's <em>derived view</em> is conservative: nothing is marked delivered, so the messages come back as input next time the agent is invoked.</div>
+  <div class="fb no">The watermark deliberately does <em>not</em> advance on cancellation. The partial reply is preserved for the human reader with an interrupted marker, but the agent will see the undelivered messages again on its next invocation.</div>
+</div>
+
+<div class="quiz-q" data-answer="d">
+  <h4>4. The member list shows "running search_web…" under Scout's name. Where does that status line come from?</h4>
+  <button class="opt" data-k="a">A. The rate of token arrival — fast tokens mean "thinking", slow tokens mean "running a tool"</button>
+  <button class="opt" data-k="b">B. A heartbeat each agent instance emits over IPC every second</button>
+  <button class="opt" data-k="c">C. The renderer infers it from the activity rail's tool cards</button>
+  <button class="opt" data-k="d">D. The presence state machine in the SessionManager, driven by turn-runner events (never by tokens) — <code>tool_call.start</code> sets the tool name, and the host renders it as a status line</button>
+  <div class="fb ok">Exactly. Presence is a first-class state machine fed by structured events; the status line is derived from the latest tool call. Token arrival never changes presence — an agent can be mid-tool-call with zero tokens flowing.</div>
+  <div class="fb no">Presence comes from the SessionManager's state machine, which consumes the turn runner's structured events (<code>status</code>, <code>tool_call.start/end</code>, <code>turn.end</code>). Deriving it from token traffic would freeze the UI exactly when the agent is doing something interesting.</div>
+</div>
+
+<div class="quiz-q" data-answer="a">
+  <h4>5. Why does <code>package.json</code> now rebuild <code>better-sqlite3</code> in <em>both</em> <code>predev</code> and <code>pretest</code>?</h4>
+  <button class="opt" data-k="a">A. Electron and the system Node have different ABIs, and one on-disk native binary can only satisfy one of them — each entry point rebuilds for its own runtime before starting</button>
+  <button class="opt" data-k="b">B. The test suite patches SQLite internals and must restore the stock binary afterwards</button>
+  <button class="opt" data-k="c">C. <code>electron-rebuild</code> is non-deterministic, so both hooks are needed for cache coherence</button>
+  <button class="opt" data-k="d">D. npm requires native modules to be rebuilt on every script invocation</button>
+  <div class="fb ok">Right — ABI 130 (Electron 33) vs ABI 137 (system Node). The binary lives at one path, so the last rebuild wins. The hooks make each flow self-healing; the original bug was a flag that made the Electron rebuild a silent no-op.</div>
+  <div class="fb no">It's an ABI conflict: a native module compiled for Electron can't load in system Node and vice versa. Since both share one file path, each entry point rebuilds for its own consumer.</div>
+</div>
+
+<p id="score"></p>
+
+</div>
+
+<script>
+(function () {
+  var answered = 0, correct = 0, total = document.querySelectorAll('.quiz-q').length;
+  document.querySelectorAll('.quiz-q').forEach(function (q) {
+    var done = false;
+    var okFb = q.querySelector('.fb.ok');
+    var noFb = q.querySelector('.fb.no');
+    q.querySelectorAll('button.opt').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (done) return;
+        done = true;
+        var right = btn.getAttribute('data-k') === q.getAttribute('data-answer');
+        q.querySelectorAll('button.opt').forEach(function (b) {
+          if (b.getAttribute('data-k') === q.getAttribute('data-answer')) b.classList.add('correct');
+          else if (b === btn && !right) b.classList.add('wrong');
+          b.disabled = true;
+        });
+        (right ? okFb : noFb).classList.add('show');
+        answered++;
+        if (right) correct++;
+        if (answered === total) {
+          document.getElementById('score').textContent =
+            'Score: ' + correct + ' / ' + total +
+            (correct === total ? ' — the room is yours.' : ' — worth a second read of the sections you missed.');
+        }
+      });
+    });
+  });
+})();
+</script>
+
+</body>
+</html>
