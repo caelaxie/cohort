@@ -1,6 +1,7 @@
 # Cohort roadmap
 
 Personal crew: local workspaces, one captain, boxed specialists.
+Runtime: Deep Agents on LangGraph, embedded in the app.
 The first mission stays open. v1 is for you.
 
 ## v1 — Personal crew
@@ -8,11 +9,15 @@ The first mission stays open. v1 is for you.
 - [ ] Create and reopen a local workspace (files + chat stay with it)
 - [ ] Create more workspaces when needed
 - [ ] Talk to the captain to run the current workspace
-- [ ] One captain that can see every workspace
-- [ ] Captain can summarize other workspaces
+- [ ] One captain that can see every workspace (prompts, files, chat, other workspace state)
+- [ ] Captain can summarize other workspaces from that full view
 - [ ] Captain can create a custom agent for the current workspace
 - [ ] Captain can direct specialists and change files only in the current workspace
 - [ ] Specialists can only see their own workspace
+- [ ] Each workspace is a sandbox; agents run autonomously inside it
+- [ ] Agents can create tools for themselves, on request or automatically
+- [ ] New tools stay in the workspace that created them
+- [ ] Agent runtime is embedded in the app and can be customized
 - [ ] Use it on a real mission of your own
 
 ## v2 — Multi-mission
@@ -37,6 +42,5 @@ The first mission stays open. v1 is for you.
 - [ ] Search over chat history
 - [ ] Agent-to-agent protocol
 - [ ] Pluggable runtimes
-- [ ] Local sandbox
 - [ ] Cloud / CI sandboxes
 - [ ] Other users
