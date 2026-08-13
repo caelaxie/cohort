@@ -61,7 +61,7 @@ function App(): React.JSX.Element {
   }
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-full min-h-0 bg-canvas text-ink">
       <WorkspaceSidebar
         workspaces={state.workspaces}
         error={error}
