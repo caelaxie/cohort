@@ -30,18 +30,28 @@ Subcommands:
 so the diff logic is testable without a live PR.
 """
 import argparse
+import errno
 import hashlib
 import json
 import os
 import re
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
+
+IS_WINDOWS = sys.platform == "win32"
+
+if IS_WINDOWS:
+    import msvcrt
+else:
+    import fcntl
 
 # Conclusions that mean "this check needs attention" (failing states).
 FAILING = {"FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "STALE"}
@@ -64,6 +74,11 @@ MANAGER_PROBE_ERROR = "probe-error"
 RELATIONSHIP_DEPENDENT = "dependent"
 RELATIONSHIP_INDEPENDENT = "independent"
 RELATIONSHIP_PROBE_ERROR = "probe-error"
+BASE_REF_CURRENT = "current"
+BASE_REF_RACE = "race"
+BASE_REF_MERGEABILITY_PENDING = "mergeability-pending"
+BASE_REF_PROBE_ERROR = "probe-error"
+BASE_REF_LEGACY_STALE = "stale"
 
 # First judgment point for an incomplete review lifecycle. The agent may extend once to 1800s when
 # concrete prior-round timing supports it; the skill contract owns that semantic decision.
@@ -92,6 +107,149 @@ DEFAULT_INVOCATION_BUDGET_SECONDS = 8 * 60 * 60
 DEAD_TIME_THRESHOLD_SECONDS = 15 * 60
 DEFAULT_INVOCATION_BACKSTOP_SECONDS = 3 * 24 * 60 * 60
 CURRENCY_RETRY_BACKOFF_SECONDS = 30
+
+
+# --- cross-platform state primitives ------------------------------------------
+#
+# The watcher needs three POSIX facilities that native Windows Python does not
+# have: an advisory file lock (fcntl.flock), a process-identity probe for the
+# PID-reuse guard (`ps -o lstart=`), and an unconditional rename. Each Windows
+# analog differs in a way that matters here, so each is named rather than
+# translated literally. See
+# docs/solutions/architecture-patterns/posix-process-supervision-on-native-windows.md.
+
+# Poll spacing while waiting on a Windows lock or a blocked rename.
+_WIN_RETRY_SECONDS = 0.05
+# Bound only the rename retry. A lock wait is unbounded, matching flock.
+_WIN_REPLACE_TIMEOUT_SECONDS = 10.0
+
+if IS_WINDOWS:
+    import ctypes
+    from ctypes import wintypes
+
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+    # Declare argtypes/restype explicitly: without them ctypes truncates HANDLEs
+    # to 32-bit ints on Win64, so a valid handle silently becomes a bad one.
+    _kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    _kernel32.OpenProcess.restype = wintypes.HANDLE
+    _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    _kernel32.CloseHandle.restype = wintypes.BOOL
+    _kernel32.GetProcessTimes.argtypes = [
+        wintypes.HANDLE, ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME), ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME)]
+    _kernel32.GetProcessTimes.restype = wintypes.BOOL
+    _kernel32.QueryFullProcessImageNameW.argtypes = [
+        wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD)]
+    _kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+
+    def _win_process_identity(pid):
+        """Creation time plus image path — the Windows analog of `ps -o lstart= -o command=`.
+
+        Creation time is the part that makes this a PID-reuse guard: Windows recycles PIDs
+        aggressively, and a recycled PID always carries a later creation time than the watcher
+        we recorded. Returns None when the process is gone or unopenable, which the caller
+        treats as "identity not proven" and declines to act on."""
+        handle = _kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return None
+        try:
+            created, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
+            if not _kernel32.GetProcessTimes(
+                    handle, ctypes.byref(created), ctypes.byref(exited),
+                    ctypes.byref(kernel), ctypes.byref(user)):
+                return None
+            started = (created.dwHighDateTime << 32) | created.dwLowDateTime
+            if not started:
+                return None
+            size = wintypes.DWORD(32768)
+            buf = ctypes.create_unicode_buffer(size.value)
+            image = (buf.value if _kernel32.QueryFullProcessImageNameW(
+                handle, 0, buf, ctypes.byref(size)) else "")
+        finally:
+            _kernel32.CloseHandle(handle)
+        return "{} {}".format(started, image)
+
+
+def _lock_acquire(fd, exclusive):
+    """Block until this process owns the lock file.
+
+    msvcrt.locking is the Windows analog of flock, with three differences. It locks a byte range
+    from the current offset rather than the whole file, so the offset is pinned to 0. It has no
+    shared mode, so a reader takes the same exclusive lock a writer does — free here, because every
+    critical section is a small local read/write with the network fetch already completed outside
+    the lock. And its blocking mode (LK_LOCK) gives up after roughly ten seconds instead of waiting,
+    so retrying the non-blocking mode is what actually reproduces flock's wait-for-the-holder
+    behavior. As on POSIX, the OS releases the lock if a holder dies, so a crash cannot wedge this."""
+    if not IS_WINDOWS:
+        fcntl.flock(fd, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        return
+    os.lseek(fd, 0, os.SEEK_SET)
+    while True:
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            return
+        except OSError as e:
+            # Retry only genuine contention. msvcrt reports a held range as EACCES; anything
+            # else (EBADF from a closed descriptor, EINVAL from a bad range) is a defect that
+            # retrying cannot clear, and swallowing it here would spin this loop forever with
+            # no output — a silent hang, which for a watcher is indistinguishable from the
+            # "monitoring is quietly not running" failure this port exists to fix.
+            if e.errno != errno.EACCES:
+                raise
+            time.sleep(_WIN_RETRY_SECONDS)
+
+
+def _lock_release(fd):
+    if not IS_WINDOWS:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return
+    os.lseek(fd, 0, os.SEEK_SET)
+    try:
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+    except OSError:
+        pass
+
+
+@contextmanager
+def _state_lock(state_dir, exclusive=True):
+    """Serialize access to the state dir for the duration of the body."""
+    os.makedirs(state_dir, exist_ok=True)
+    # O_RDWR|O_CREAT rather than a truncating open("w"): on Windows, truncating a file another
+    # process holds a byte-range lock on fails, which would make lock acquisition itself the race.
+    fd = os.open(os.path.join(state_dir, "lock"), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        _lock_acquire(fd, exclusive)
+        try:
+            yield
+        finally:
+            _lock_release(fd)
+    finally:
+        os.close(fd)
+
+
+def _replace_atomic(src, dst):
+    """Atomically move `src` onto `dst`.
+
+    POSIX rename always succeeds over an open destination. Windows refuses while any other handle
+    to `dst` is open, so an unlocked best-effort reader — or a virus scanner that opened the file
+    behind us — would otherwise turn a routine concurrent read into a crashed writer. Retry briefly
+    rather than treating that transient sharing violation as a failure."""
+    if not IS_WINDOWS:
+        os.replace(src, dst)
+        return
+    deadline = time.monotonic() + _WIN_REPLACE_TIMEOUT_SECONDS
+    while True:
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(_WIN_RETRY_SECONDS)
 
 
 class _WatchSuperseded(Exception):
@@ -166,28 +324,113 @@ def _host_args(host):
     return ["--hostname", host] if host else []
 
 
-def fetch_host_branch_update_capability(pr, owner, name, host=None):
-    """Read GitHub's operation-specific update-branch capability without mutating.
+def _valid_oid(value):
+    return isinstance(value, str) and bool(
+        re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", value))
 
-    This fact intentionally says nothing about direct Git push authority, which DIRTY repair must
-    prove separately. Probe and response-shape uncertainty fail closed as `unknown`.
-    """
+
+def fetch_pr_merge_identity(pr, owner, name, host=None):
+    """Read mergeability and the identities it was computed from in one GraphQL observation."""
     query = """
 query($owner:String!,$repo:String!,$pr:Int!){
-  repository(owner:$owner,name:$repo){
-    pullRequest(number:$pr){ viewerCanUpdateBranch }
-  }
+  repository(owner:$owner,name:$repo){ pullRequest(number:$pr){
+    mergeable mergeStateStatus headRefOid baseRefOid baseRefName viewerCanUpdateBranch
+    baseRef { target { oid } }
+    potentialMergeCommit { oid parents(first:2) { nodes { oid } } }
+  } }
 }"""
     r = _run(["gh", "api", "graphql", *_host_args(host), "-f", f"owner={owner}",
               "-f", f"repo={name}", "-F", f"pr={pr}", "-f", f"query={query}"])
     if r.returncode != 0:
-        return "unknown"
+        return None
     try:
-        capability = json.loads(r.stdout)["data"]["repository"]["pullRequest"][
-            "viewerCanUpdateBranch"]
+        value = json.loads(r.stdout)["data"]["repository"]["pullRequest"]
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-        return "unknown"
-    return capability if isinstance(capability, bool) else "unknown"
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def fetch_base_ref(owner, name, ref, merge_identity, host=None):
+    """Bind GitHub's mergeability observation to an independently probed current base ref.
+
+    `baseRefOid` is retained only as historical PR metadata. Current identity comes from both the
+    PR's `baseRef.target.oid` and an exact Git-ref read; a usable generated test merge must then
+    name that base and the observed PR head as its two parents.
+    """
+    historical_oid = (merge_identity or {}).get("baseRefOid")
+    head_oid = (merge_identity or {}).get("headRefOid")
+    mergeable = (merge_identity or {}).get("mergeable")
+    merge_state_status = (merge_identity or {}).get("mergeStateStatus")
+    graphql_oid = (((merge_identity or {}).get("baseRef") or {}).get("target") or {}).get("oid")
+    potential_merge = (merge_identity or {}).get("potentialMergeCommit")
+    merge_commit_oid = potential_merge.get("oid") if isinstance(potential_merge, dict) else None
+    merge_parent_oids = (((potential_merge or {}).get("parents") or {}).get("nodes")
+                         if isinstance(potential_merge, dict) else None)
+    if isinstance(merge_parent_oids, list):
+        merge_parent_oids = [node.get("oid") if isinstance(node, dict) else None
+                             for node in merge_parent_oids]
+    else:
+        merge_parent_oids = []
+    base = {
+        "host": host or "github.com",
+        "repository": f"{owner}/{name}",
+        "ref": ref,
+        "oid": None,
+        "graphql_oid": graphql_oid,
+        "historical_oid": historical_oid,
+        "merge_commit_oid": merge_commit_oid,
+        "merge_parent_oids": merge_parent_oids,
+        "identity": BASE_REF_PROBE_ERROR,
+    }
+    if not ref:
+        return base
+    encoded_ref = quote(ref, safe="/")
+    r = _run([
+        "gh", "api", *_host_args(host),
+        f"repos/{owner}/{name}/git/ref/heads/{encoded_ref}",
+        "--jq", ".object.sha",
+    ])
+    current_oid = (r.stdout or "").strip()
+    if r.returncode != 0 or not _valid_oid(current_oid):
+        return base
+    base["oid"] = current_oid
+    if not (_valid_oid(graphql_oid) and _valid_oid(head_oid)):
+        return base
+    if current_oid.lower() != graphql_oid.lower():
+        base["identity"] = BASE_REF_RACE
+        return base
+
+    if mergeable == "MERGEABLE" and merge_state_status not in (None, "UNKNOWN", "DIRTY"):
+        if potential_merge is None:
+            base["identity"] = BASE_REF_MERGEABILITY_PENDING
+            return base
+        if (not _valid_oid(merge_commit_oid) or len(merge_parent_oids) != 2
+                or not all(_valid_oid(oid) for oid in merge_parent_oids)):
+            return base
+        if (merge_parent_oids[0].lower() != current_oid.lower()
+                or merge_parent_oids[1].lower() != head_oid.lower()):
+            base["identity"] = BASE_REF_RACE
+            return base
+    elif not (mergeable == "CONFLICTING" and merge_state_status == "DIRTY"):
+        base["identity"] = BASE_REF_MERGEABILITY_PENDING
+        return base
+
+    base["identity"] = BASE_REF_CURRENT
+    return base
+
+
+def _base_ref_blocker(base):
+    identity = (base or {}).get("identity")
+    if identity is None:
+        # Compatibility for pre-change --fetch-file fixtures and persisted snapshots.
+        identity = (base or {}).get("freshness")
+    if identity == BASE_REF_CURRENT:
+        return None
+    if identity in (BASE_REF_RACE, BASE_REF_MERGEABILITY_PENDING):
+        return identity
+    if identity == BASE_REF_LEGACY_STALE:
+        return BASE_REF_LEGACY_STALE
+    return BASE_REF_PROBE_ERROR
 
 
 def _eyes_reaction_identities(reaction_pages):
@@ -245,6 +488,16 @@ def _fetch_default_branch(owner, name, host=None):
 def _thread_identity(t):
     """The remote-truth identity of a thread's latest state."""
     return (t.get("last_comment_id"), t.get("last_comment_at"))
+
+
+def _prior_thread_activity_identity(t):
+    """The last external-review baseline already accepted for this parked thread."""
+    acted_identity = t.get("acted_identity")
+    if (t.get("disposition") in (DISPOSITION_DISPATCHED, DISPOSITION_NEEDS_HUMAN)
+            and isinstance(acted_identity, (list, tuple))
+            and len(acted_identity) == 2):
+        return tuple(acted_identity)
+    return _thread_identity(t)
 
 
 def _default_pr_chain():
@@ -462,7 +715,7 @@ def fetch(pr, repo):
     """Fetch both event streams via gh into one combined snapshot dict."""
     repo_args = ["--repo", repo] if repo else []
     view = _run_checked(["gh", "pr", "view", str(pr), *repo_args, "--json",
-                         "state,mergeable,mergeStateStatus,reviewDecision,headRefOid,baseRefOid,baseRefName,headRefName,url,number,"
+                         "state,mergeable,mergeStateStatus,reviewDecision,headRefOid,baseRefOid,baseRefName,headRefName,url,number,isDraft,"
                          "statusCheckRollup,author,comments,reviews"],
                         "gh pr view")
     v = json.loads(view.stdout)
@@ -491,25 +744,37 @@ def fetch(pr, repo):
             })
 
     owner, name, host = _resolve_repo_ref(repo, v.get("url"))
-    base = {
-        "host": host or "github.com",
-        "repository": f"{owner}/{name}",
-        "ref": v.get("baseRefName"),
-        "oid": v.get("baseRefOid"),
-    }
+    merge_identity = fetch_pr_merge_identity(v.get("number") or pr, owner, name, host)
+    merge_observation = merge_identity or v
+    mergeable = merge_observation.get("mergeable")
+    merge_state_status = merge_observation.get("mergeStateStatus")
+    head = v.get("headRefOid")
+    base = fetch_base_ref(owner, name, v.get("baseRefName"), merge_observation, host)
+    if merge_identity is not None:
+        identity_head = merge_identity.get("headRefOid")
+        identity_base_ref = merge_identity.get("baseRefName")
+        if (not isinstance(identity_base_ref, str)
+                or not (_valid_oid(identity_head) and _valid_oid(head))):
+            base["identity"] = BASE_REF_PROBE_ERROR
+        elif (identity_head.lower() != head.lower()
+                or identity_base_ref != v.get("baseRefName")):
+            # The checks and review payload came from `v`; do not combine them with mergeability
+            # observed for a different head or base branch.
+            base["identity"] = BASE_REF_RACE
     pr_chain = fetch_pr_chain(v.get("number") or pr, repo, v.get("url"),
                               v.get("baseRefName"), v.get("headRefName"), owner, name, host)
     currency_probe = {
-        "mergeable": v.get("mergeable"),
-        "merge_state_status": v.get("mergeStateStatus"),
+        "mergeable": mergeable,
+        "merge_state_status": merge_state_status,
         "base": base,
         "pr_chain": pr_chain,
     }
     host_branch_update_capability = "unknown"
-    if (v.get("mergeStateStatus") == "BEHIND"
-            and _branch_currency_observation(currency_probe, v.get("headRefOid")) is not None):
-        host_branch_update_capability = fetch_host_branch_update_capability(
-            v.get("number") or pr, owner, name, host)
+    if (merge_state_status == "BEHIND"
+            and _branch_currency_observation(currency_probe, head) is not None):
+        capability = merge_observation.get("viewerCanUpdateBranch")
+        if isinstance(capability, bool):
+            host_branch_update_capability = capability
 
     # In-progress review signal: an 👀 (EYES) reaction on the PR body is how several review bots
     # (Codex among them) announce a review is *underway* — a present in-progress signal means the PR
@@ -519,11 +784,11 @@ def fetch(pr, repo):
     review_signal_count = len(review_signal_identities)
     review_in_progress = review_signal_count > 0
 
-    head = v.get("headRefOid")
     return {
         "pr_state": v.get("state"),
-        "mergeable": v.get("mergeable"),
-        "merge_state_status": v.get("mergeStateStatus"),
+        "pr_is_draft": v.get("isDraft"),
+        "mergeable": mergeable,
+        "merge_state_status": merge_state_status,
         "review_decision": v.get("reviewDecision") or None,
         "head_sha": head,
         "base": base,
@@ -546,9 +811,11 @@ def fetch(pr, repo):
 
 def _body_hash(body):
     """Edit identity for a top-level comment / review body: `gh pr view --json` exposes no
-    updatedAt, so hash the body. When a dispatched wrapper is later edited to add an actionable
-    request, this changes and the item reactivates (unlike a thread, our reply is a separate
-    top-level comment and never edits the original, so there is no self-reply retrigger)."""
+    updatedAt, so hash the body. Feeds the external_review_moved activity signal (an edit wakes
+    the watch and extends the settle clock) and `needs-human` reactivation (a human may answer a
+    parked question by editing the same comment), but deliberately NOT `dispatched` reactivation:
+    status bots rewrite their bodies on every push, so edit-keyed reactivation of handled items
+    re-actionized bot comments forever (#1309)."""
     return hashlib.sha1((body or "").encode("utf-8")).hexdigest()[:16]
 
 
@@ -574,7 +841,8 @@ def fetch_awaiting_approval(owner, name, head, host=None):
     """Count Actions workflow runs on this head that are awaiting maintainer approval —
     the fork-PR security gate. Such a run has created NO check-run yet, so it is invisible
     to statusCheckRollup; without this, a fork PR blocked on approval reads as 'all checks ok'.
-    Best-effort: any API/permission failure returns 0 rather than failing the tick."""
+    Best-effort: an API/permission failure returns None so the tick can preserve the
+    last proven gate state rather than treating an unknown result as a proven clear."""
     if not head:
         return 0
     r = _run(["gh", "api", *_host_args(host),
@@ -582,11 +850,11 @@ def fetch_awaiting_approval(owner, name, head, host=None):
               "--jq", '[.workflow_runs[] | select(.status==\"action_required\" or .status==\"waiting\" '
                       'or .conclusion==\"action_required\")] | length'])
     if r.returncode != 0:
-        return 0
+        return None
     try:
         return int((r.stdout or "").strip() or 0)
     except ValueError:
-        return 0
+        return None
 
 
 def fetch_threads(pr, owner, name, host=None):
@@ -645,6 +913,9 @@ def _empty_state(pr, repo, url, now):
         "review_in_progress": False, "review_signal_count": 0, "review_signal_identities": [],
         "review_signal_seen_on_head": False,
         "review_signal_first_seen_at": None, "review_signal_last_changed_at": None,
+        "blocked_external_head_sha": None,
+        "blocked_external_first_seen_at": None,
+        "blocked_external_review_last_activity_at": None,
         "pr_chain": _default_pr_chain(),
         "base": None,
         "branch_currency_state": _empty_branch_currency_state(),
@@ -674,8 +945,10 @@ def _load_branch_currency_state(state):
     return currency
 
 
-def _mergeability_certain(mergeable, merge_state_status):
-    """GitHub computes mergeability asynchronously; UNKNOWN/incomplete values are not facts."""
+def _mergeability_certain(mergeable, merge_state_status, base):
+    """GitHub mergeability is usable only when its cached base is proven current."""
+    if _base_ref_blocker(base) is not None:
+        return False
     if mergeable not in ("MERGEABLE", "CONFLICTING"):
         return False
     if not merge_state_status or merge_state_status == "UNKNOWN":
@@ -710,7 +983,7 @@ def _normal_base_route(cur):
 
 def _branch_currency_observation(cur, head):
     status = cur.get("merge_state_status")
-    certain = _mergeability_certain(cur.get("mergeable"), status)
+    certain = _mergeability_certain(cur.get("mergeable"), status, cur.get("base"))
     if not certain or status not in ("BEHIND", "DIRTY"):
         return None
     route = _normal_base_route(cur)
@@ -1023,22 +1296,32 @@ def _update_trajectory(state, head, new_checks, new_threads, new_feedback, actio
     }
 
 
-def _apply_dispositions(items, id_key, prior, identity_fn=None):
+def _apply_dispositions(items, id_key, prior, identity_fn=None,
+                        reactivate_dispositions=(DISPOSITION_DISPATCHED, DISPOSITION_NEEDS_HUMAN)):
     """Claim->act->confirm dedup for a review stream: an item stays actionable until `mark`
     records a non-open disposition (persisted in prior[id]['disposition']). Returns
     (persisted_by_id, actionable_list, open_needs_human_count).
 
-    When identity_fn is given, a `dispatched` **or** `needs-human` item is *reactivated* — set back
-    to open and re-actionized — once its last-comment / edit identity moves past the one we acted on.
-    That acted-on identity is captured lazily on the first tick we observe the item parked, which is
-    *after* our own reply (a fix acknowledgment, or a needs-human `decision_context` reply) has
-    already landed in the fetch — so our reply becomes the baseline and does not re-trigger, while a
-    genuine later comment does. For `needs-human` this is exactly how a **human answering the parked
-    question** (a reviewer reply, or an edit of the top-level comment) re-opens it and wakes the loop,
-    instead of it sitting parked forever; an explicit `mark --disposition open` still forces it too.
-    This is also what stops a dispatched-but-unresolved thread with fresh reviewer activity from being
-    silenced out of counts.threads and letting the merge-ready gate call the PR ready. An item with no
-    identity_fn never auto-reactivates (a brand-new top-level comment is just a new id)."""
+    When identity_fn is given, an item whose disposition is in `reactivate_dispositions` is
+    *reactivated* — set back to open and re-actionized — once its last-comment / edit identity moves
+    past the one we acted on. That acted-on identity is captured lazily on the first tick we observe
+    the item parked, which is *after* our own reply (a fix acknowledgment, or a needs-human
+    `decision_context` reply) has already landed in the fetch — so our reply becomes the baseline
+    and does not re-trigger, while a genuine later comment does. For `needs-human` this is exactly
+    how a **human answering the parked question** (a reviewer reply on the thread, or an edit of the
+    parked top-level comment) re-opens it and wakes the loop, instead of it sitting parked forever;
+    an explicit `mark --disposition open` still forces it too. This is also what stops a
+    dispatched-but-unresolved thread with fresh reviewer activity from being silenced out of
+    counts.threads and letting the merge-ready gate call the PR ready.
+
+    The feedback stream excludes DISPATCHED from `reactivate_dispositions` deliberately: status
+    bots rewrite their comment bodies on every push, so edit-keyed reactivation re-actionized
+    handled bot comments forever and merge-ready could never fire (#1309). A `needs-human`
+    feedback item still reactivates on edit — a human answering by editing their own comment must
+    wake the loop, mirroring the thread semantics. (A bot comment parked `needs-human` can churn
+    open on bot self-edits; that costs a redundant resolve pass, not a stuck loop — merge-ready is
+    blocked by open_needs_human either way.) A brand-new comment is just a new id, always
+    actionable."""
     persisted, actionable, needs_human = {}, [], 0
     for it in items:
         iid = it.get(id_key)
@@ -1047,7 +1330,7 @@ def _apply_dispositions(items, id_key, prior, identity_fn=None):
         pri = prior.get(iid, {})
         disposition = pri.get("disposition", DISPOSITION_OPEN)
         acted_identity = pri.get("acted_identity")
-        if disposition in (DISPOSITION_DISPATCHED, DISPOSITION_NEEDS_HUMAN) and identity_fn is not None:
+        if disposition in reactivate_dispositions and identity_fn is not None:
             current_identity = identity_fn(it)
             if acted_identity is None:
                 acted_identity = current_identity   # first post-action observation: adopt as baseline
@@ -1076,6 +1359,10 @@ def diff(state, cur, now=None, advance_trajectory=True):
 
     prior_threads = state.get("threads", {})
     prior_feedback = state.get("feedback", {})
+    prior_feedback_activity = {
+        fid: item.get("edit_id") for fid, item in prior_feedback.items()
+    }
+    prior_review_decision = state.get("review_decision")
     prior_change_sig = _change_sig(state)
     prior_review_in_progress = bool(state.get("review_in_progress", False))
     prior_review_signal_count = state.get("review_signal_count")
@@ -1097,6 +1384,9 @@ def diff(state, cur, now=None, advance_trajectory=True):
         review_signal_identities = sorted(set(map(str, review_signal_identities)))
         review_signal_count = len(review_signal_identities)
     review_in_progress = review_signal_count > 0
+    signal_changed = (review_signal_identities != prior_review_signal_identities
+                      if review_signal_identities is not None else
+                      review_signal_count != prior_review_signal_count)
 
     if head_changed:
         # SHA-scoped state is meaningless on a new head.
@@ -1111,9 +1401,6 @@ def diff(state, cur, now=None, advance_trajectory=True):
             state["review_signal_seen_on_head"] = True
             legacy_seen_at = state.get("last_change_at") if prior_review_in_progress else None
             state["review_signal_first_seen_at"] = legacy_seen_at or _iso(now)
-        signal_changed = (review_signal_identities != prior_review_signal_identities
-                          if review_signal_identities is not None else
-                          review_signal_count != prior_review_signal_count)
         if signal_changed:
             state["review_signal_last_changed_at"] = _iso(now)
 
@@ -1151,21 +1438,51 @@ def diff(state, cur, now=None, advance_trajectory=True):
     #     is still unresolved is reactivated once its last-comment identity moves past the one we
     #     acted on (acted_identity) — so a reviewer re-engaging is not silently dropped, yet the
     #     acting loop's own reply (captured as the baseline on first observation) does not
-    #     re-trigger. A `needs-human` thread stays parked (open_needs_human keeps merge-ready from
+    #     re-trigger. Its disappearance is likewise the resolver confirming the dispatched work,
+    #     not fresh review activity; removals of open or `needs-human` threads remain external.
+    #     A `needs-human` thread stays parked (open_needs_human keeps merge-ready from
     #     firing) until a *human* answers it — a later reply/edit past that same baseline reopens and
     #     wakes it — or an explicit `mark --disposition open` forces it.
     #   - Feedback (top-level comments + review bodies): no remote "resolve" exists, so an item
-    #     never drops out on its own — `mark --comment <id>` is the only thing that silences it. A
-    #     dispatched item reactivates only when its own body is *edited* (edit_id changes) to add a
-    #     new request; a brand-new comment is just a new id. Our reply is a separate top-level
-    #     comment, never an edit of the original, so it never retriggers.
+    #     never drops out on its own — `mark --comment <id>` is the only thing that silences it.
+    #     Reactivation on a body edit is per-disposition: a `dispatched` item is NEVER
+    #     auto-reactivated — status bots (changeset-bot, CodeRabbit, Codecov) rewrite their own
+    #     comment bodies on every push, so edit-keyed reactivation re-actionized handled bot
+    #     comments forever and the merge-ready gate could never fire (#1309) — while a
+    #     `needs-human` item still reactivates on edit, because a human may answer the parked
+    #     question by editing the same comment/review body. New requests otherwise arrive as
+    #     review threads or brand-new comments (new ids), both still actionable; edit_id also
+    #     feeds external_review_moved below, so a dispatched item's edit wakes/extends the settle
+    #     clock without re-actionizing it.
     # Either stream's open needs-human items feed open_needs_human so the merge-ready gate
     # refuses to call the PR ready while a human decision is still pending.
     new_threads, actionable_threads, human_threads = _apply_dispositions(
         cur["threads"], "thread_id", prior_threads,
         identity_fn=lambda t: [t.get("last_comment_id"), t.get("last_comment_at")])
     new_feedback, actionable_feedback, human_feedback = _apply_dispositions(
-        cur.get("feedback") or [], "id", prior_feedback, identity_fn=lambda c: [c.get("edit_id")])
+        cur.get("feedback") or [], "id", prior_feedback,
+        identity_fn=lambda c: [c.get("edit_id")],
+        reactivate_dispositions=(DISPOSITION_NEEDS_HUMAN,))
+    current_thread_activity = {
+        item.get("thread_id"): _thread_identity(item)
+        for item in cur["threads"] if item.get("thread_id")
+    }
+    prior_thread_activity = {
+        tid: _prior_thread_activity_identity(item) for tid, item in prior_threads.items()
+        if not (item.get("disposition") == DISPOSITION_DISPATCHED
+                and tid not in current_thread_activity)
+    }
+    current_feedback_activity = {
+        item.get("id"): item.get("edit_id")
+        for item in (cur.get("feedback") or []) if item.get("id")
+    }
+    external_review_moved = (
+        head_changed
+        or current_thread_activity != prior_thread_activity
+        or current_feedback_activity != prior_feedback_activity
+        or cur.get("review_decision") != prior_review_decision
+        or signal_changed
+    )
     open_needs_human = human_threads + human_feedback
     # Identities of the currently-parked needs-human items, so the watch can tell an already-
     # surfaced residual (do not re-wake) from a newly-arrived one (wake) — a parked human decision
@@ -1184,7 +1501,29 @@ def diff(state, cur, now=None, advance_trajectory=True):
     state["review_in_progress"] = review_in_progress
     state["review_signal_count"] = review_signal_count
     state["review_signal_identities"] = review_signal_identities
-    state["awaiting_approval"] = cur.get("awaiting_approval", 0)
+    observed_awaiting_approval = cur.get("awaiting_approval")
+    approval_probe_succeeded = observed_awaiting_approval is not None
+    awaiting_approval = (
+        observed_awaiting_approval
+        if approval_probe_succeeded
+        else state.get("awaiting_approval", 0)
+    )
+    state["awaiting_approval"] = awaiting_approval
+    if awaiting_approval > 0:
+        gate_is_new_for_head = (
+            state.get("blocked_external_head_sha") != head
+            or not state.get("blocked_external_review_last_activity_at")
+        )
+        if gate_is_new_for_head:
+            state["blocked_external_head_sha"] = head
+            state["blocked_external_first_seen_at"] = _iso(now)
+            state["blocked_external_review_last_activity_at"] = _iso(now)
+        elif external_review_moved:
+            state["blocked_external_review_last_activity_at"] = _iso(now)
+    elif approval_probe_succeeded:
+        state["blocked_external_head_sha"] = None
+        state["blocked_external_first_seen_at"] = None
+        state["blocked_external_review_last_activity_at"] = None
     state["pr_chain"] = cur.get("pr_chain") or _default_pr_chain()
     state["base"] = cur.get("base")
     branch_currency = _apply_branch_currency(state, cur, head, head_changed, now)
@@ -1218,6 +1557,10 @@ def diff(state, cur, now=None, advance_trajectory=True):
     # gated. blocked_external = the loop cannot progress (no failing check to fix, but CI can't run)
     # and no one in this loop can unblock it — it is up to a maintainer of the base repo.
     awaiting_approval = state["awaiting_approval"]
+    blocked_external_review_quiet_seconds = (
+        _elapsed(state.get("blocked_external_review_last_activity_at"), now)
+        if awaiting_approval > 0 else 0
+    )
     # "OK" requires every check terminal, none failing, AND none gated on approval. A still-
     # IN_PROGRESS or awaiting-approval check is neither ok nor failing — do not exit green.
     all_checks_ok = checks_terminal and not has_failing and bool(cur["checks"]) and awaiting_approval == 0
@@ -1227,6 +1570,7 @@ def diff(state, cur, now=None, advance_trajectory=True):
 
     return {
         "pr_state": cur["pr_state"],
+        "pr_is_draft": cur.get("pr_is_draft"),
         "mergeable": cur["mergeable"],
         "merge_state_status": cur["merge_state_status"],
         "review_decision": cur["review_decision"],
@@ -1234,7 +1578,8 @@ def diff(state, cur, now=None, advance_trajectory=True):
         "head_changed": head_changed,
         "base": state.get("base"),
         "mergeability_certain": _mergeability_certain(
-            cur.get("mergeable"), cur.get("merge_state_status")),
+            cur.get("mergeable"), cur.get("merge_state_status"), cur.get("base")),
+        "base_ref_blocker": _base_ref_blocker(cur.get("base")),
         "host_branch_update_capability": cur.get("host_branch_update_capability", "unknown"),
         "branch_currency": branch_currency,
         "branch_currency_blocker": ({
@@ -1255,6 +1600,12 @@ def diff(state, cur, now=None, advance_trajectory=True):
         "review_signal_last_changed_at": state.get("review_signal_last_changed_at"),
         "checks_awaiting_approval": awaiting_approval,
         "blocked_external": blocked_external,
+        "blocked_external_first_seen_at": state.get("blocked_external_first_seen_at"),
+        "blocked_external_review_last_activity_at": state.get(
+            "blocked_external_review_last_activity_at"),
+        "blocked_external_review_quiet_seconds": blocked_external_review_quiet_seconds,
+        "blocked_external_review_moved_this_tick": (
+            awaiting_approval > 0 and external_review_moved),
         "pr_chain": state["pr_chain"],
         "stack_blocker": _stack_blocker(state["pr_chain"]),
         "open_needs_human": open_needs_human,
@@ -1290,7 +1641,10 @@ def _change_sig(state):
     """Everything whose movement should reset the settle clock."""
     checks = {k: (v.get("status"), v.get("conclusion")) for k, v in state.get("checks", {}).items()}
     threads = {tid: _thread_identity(v) for tid, v in state.get("threads", {}).items()}
-    feedback = {fid: v.get("disposition") for fid, v in state.get("feedback", {}).items()}
+    # edit_id is part of the signal so a body edit of a silenced item still resets the settle
+    # clock (review activity happened) even though it no longer reopens the item (#1309).
+    feedback = {fid: (v.get("disposition"), v.get("edit_id"))
+                for fid, v in state.get("feedback", {}).items()}
     currency = _load_branch_currency_state(state)
     current_currency = currency.get("items", {}).get(currency.get("current_key")) or {}
     return (checks, threads, feedback, state.get("review_decision"), state.get("mergeable"),
@@ -1377,12 +1731,8 @@ def _session_started_at(value):
 
 @contextmanager
 def locked_state(state_dir, pr, repo, now):
-    import fcntl
-    os.makedirs(state_dir, exist_ok=True)
-    lock_path = os.path.join(state_dir, "lock")
     state_path = os.path.join(state_dir, "state.json")
-    with open(lock_path, "w") as lf:
-        fcntl.flock(lf, fcntl.LOCK_EX)
+    with _state_lock(state_dir):
         if os.path.exists(state_path):
             with open(state_path) as f:
                 state = json.load(f)
@@ -1406,8 +1756,7 @@ def locked_state(state_dir, pr, repo, now):
         tmp.flush()
         os.fsync(tmp.fileno())
         tmp.close()
-        os.replace(tmp.name, state_path)
-        fcntl.flock(lf, fcntl.LOCK_UN)
+        _replace_atomic(tmp.name, state_path)
 
 
 def _fetch_snapshot(args):
@@ -1552,6 +1901,10 @@ def _wake_reason(a, settle_seconds):
         return "feedback-candidate"
     if a.get("stack_blocker"):
         return "stack-blocked"
+    base_ref_blocker = (a.get("base_ref_blocker")
+                        if "base_ref_blocker" in a else _base_ref_blocker(a.get("base")))
+    if base_ref_blocker:
+        return "base-ref-blocked"
     branch_currency = a.get("branch_currency") or {}
     if a.get("has_failing_checks") and a.get("checks_terminal"):
         # a dispatched check left terminally red (counts.ci is 0 — nothing new to dispatch) is a
@@ -1578,7 +1931,12 @@ def _wake_reason(a, settle_seconds):
     # Interactive merge-ready does NOT require `all_checks_ok`'s "at least one observed check": a repo
     # with no configured checks has a CLEAN/MERGEABLE PR that should be callable ready. (That guard
     # stays in pipeline success, where a not-yet-created rollup must not read as a pass.)
-    if (a.get("mergeable") == "MERGEABLE" and a.get("merge_state_status") == "CLEAN"
+    mergeability_certain = a.get("mergeability_certain")
+    if mergeability_certain is None:
+        mergeability_certain = _mergeability_certain(
+            a.get("mergeable"), a.get("merge_state_status"), a.get("base"))
+    if (mergeability_certain and a.get("mergeable") == "MERGEABLE"
+            and a.get("merge_state_status") == "CLEAN"
             and a.get("checks_terminal") and not a.get("has_failing_checks")
             and a.get("checks_awaiting_approval", 0) == 0
             and a.get("branch_currency_blocker") is None
@@ -1614,8 +1972,12 @@ def _blocker_sig(a):
         sig.add("__terminal_red__")
     if a.get("blocked_external"):
         sig.add("__blocked_external__")
+        sig.add(("approval-review-state", bool(a.get("review_signal_seen_on_head")),
+                 tuple(a.get("review_signal_identities") or []), a.get("review_decision")))
     if a.get("stack_blocker"):
         sig.add(f"__stack__:{a['stack_blocker']}")
+    if a.get("base_ref_blocker"):
+        sig.add(f"__base_ref__:{a['base_ref_blocker']}")
     branch_currency = a.get("branch_currency") or {}
     currency_disposition = branch_currency.get("disposition")
     if (currency_disposition in (CURRENCY_CONFIRMED, DISPOSITION_NEEDS_HUMAN)
@@ -1635,23 +1997,16 @@ def _blocker_sig(a):
 def _process_identity(pid):
     """Best-effort PID-reuse guard for replacing a prior watcher. If process identity cannot be
     proven, generation invalidation still suppresses its wake and we leave OS cleanup alone."""
-    r = subprocess.run(["ps", "-p", str(pid), "-o", "lstart=", "-o", "command="],
-                       capture_output=True, text=True)
+    if IS_WINDOWS:
+        return _win_process_identity(pid)
+    try:
+        r = subprocess.run(["ps", "-p", str(pid), "-o", "lstart=", "-o", "command="],
+                           capture_output=True, text=True)
+    except OSError:
+        return None   # no ps on PATH: unproven identity, same as a failed lookup
     if r.returncode != 0:
         return None
     return (r.stdout or "").strip() or None
-
-
-@contextmanager
-def _watch_lock(state_dir, exclusive):
-    import fcntl
-    os.makedirs(state_dir, exist_ok=True)
-    with open(os.path.join(state_dir, "lock"), "w") as lf:
-        fcntl.flock(lf, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
-        try:
-            yield
-        finally:
-            fcntl.flock(lf, fcntl.LOCK_UN)
 
 
 def _watch_candidate_path(args):
@@ -1674,19 +2029,19 @@ def _reserve_watch_candidate(args, generation):
         "pid": os.getpid(),
         "process_identity": _process_identity(os.getpid()),
     }
-    with _watch_lock(args.state_dir, exclusive=True):
+    with _state_lock(args.state_dir, exclusive=True):
         previous = _read_watch_candidate(args)
         tmp = tempfile.NamedTemporaryFile("w", dir=args.state_dir, delete=False)
         json.dump(candidate, tmp)
         tmp.flush()
         os.fsync(tmp.fileno())
         tmp.close()
-        os.replace(tmp.name, _watch_candidate_path(args))
+        _replace_atomic(tmp.name, _watch_candidate_path(args))
     return previous
 
 
 def _clear_watch_candidate(args, generation):
-    with _watch_lock(args.state_dir, exclusive=True):
+    with _state_lock(args.state_dir, exclusive=True):
         if _read_watch_candidate(args).get("generation") != generation:
             return
         try:
@@ -1724,7 +2079,7 @@ def _activate_watch(args, generation, now, cur):
 def _watch_is_current(args, generation):
     """Read the ownership generation under the state lock without rewriting state.json."""
     state_path = os.path.join(args.state_dir, "state.json")
-    with _watch_lock(args.state_dir, exclusive=False):
+    with _state_lock(args.state_dir, exclusive=False):
         if not os.path.exists(state_path):
             return False
         with open(state_path) as f:
@@ -1736,7 +2091,7 @@ def _emit_wake_if_current(args, generation, reason, **fields):
     the new generation has become current. Invocation replacement also supersedes every ordinary
     wake from the old budget, even when the replacement kept the same watch generation."""
     state_path = os.path.join(args.state_dir, "state.json")
-    with _watch_lock(args.state_dir, exclusive=False):
+    with _state_lock(args.state_dir, exclusive=False):
         if not os.path.exists(state_path):
             return False
         with open(state_path) as f:
@@ -1757,7 +2112,13 @@ def _emit_wake_if_current(args, generation, reason, **fields):
 
 
 def _terminate_replaced_watch(previous):
-    """Promptly stop the replaced process, but never signal a PID whose identity no longer matches."""
+    """Promptly stop the replaced process, but never signal a PID whose identity no longer matches.
+
+    On Windows os.kill maps to TerminateProcess, so the replaced watcher dies abruptly instead of
+    unwinding a SIGTERM handler: it cannot clear its own watch candidate, nor finish terminating a
+    predecessor it was mid-handoff with. Neither leaks. The replacement has already written its own
+    candidate before calling this, and any watcher left running reads a foreign watch_generation on
+    its next poll and exits on its own — so the abrupt path costs at most one poll interval."""
     pid = previous.get("pid")
     identity = previous.get("process_identity")
     if not isinstance(pid, int) or pid == os.getpid() or not identity:
@@ -1766,8 +2127,8 @@ def _terminate_replaced_watch(previous):
         return
     try:
         os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
+    except OSError:
+        pass   # exited between the identity check and here (Windows reports this as a plain OSError)
 
 
 def cmd_watch(args):
@@ -1796,6 +2157,9 @@ def cmd_watch(args):
         if interrupt_immediately:
             raise _WatchSuperseded()
 
+    # Cooperative supersession. Windows accepts this handler but never delivers SIGTERM across
+    # processes, so there it is inert and the loop's own watch_generation checks are what retire a
+    # replaced watcher — the handler is the fast path, not the correctness guarantee.
     prior_sigterm = signal.getsignal(signal.SIGTERM)
     signal.signal(signal.SIGTERM, request_stop)
     try:
@@ -1864,7 +2228,23 @@ def cmd_watch(args):
                     persisted_state_age_seconds=actionable.get("persisted_state_age_seconds"),
                 )
                 return
-            if reason in ("needs-human", "blocked-failing", "blocked-external", "stack-blocked") and _blocker_sig(actionable) <= armed:
+            drain_seconds = getattr(args, "blocked_external_drain_seconds", None)
+            drain_quiet = actionable.get("blocked_external_review_quiet_seconds", 0)
+            if (drain_seconds is not None and actionable.get("blocked_external")
+                    and drain_quiet >= drain_seconds):
+                _emit_wake_if_current(
+                    args, generation, "blocked-external-drained", url=actionable.get("url"),
+                    pr_state=actionable.get("pr_state"), counts=actionable.get("counts"),
+                    blocked_external_review_quiet_seconds=drain_quiet,
+                    blocked_external_drain_seconds=drain_seconds,
+                )
+                return
+            approval_review_moved = (
+                reason == "blocked-external"
+                and actionable.get("blocked_external_review_moved_this_tick"))
+            if (reason in ("needs-human", "blocked-failing", "blocked-external",
+                           "stack-blocked", "base-ref-blocked")
+                    and not approval_review_moved and _blocker_sig(actionable) <= armed):
                 reason = None   # already-surfaced residual — keep watching, do not re-wake or terminate
             if reason:
                 _emit_wake_if_current(args, generation, reason, url=actionable.get("url"),
@@ -2092,15 +2472,43 @@ def cmd_mark(args):
                         entry["acted_identity"] = ident
                 elif args.comment and args.acted_edit_id:
                     # our reply is a separate top-level comment and never edits THIS one, so the
-                    # snapshot-time edit_id the agent passes is already the correct baseline (no fetch).
+                    # snapshot-time edit_id the agent passes is already the correct baseline (no
+                    # fetch). Only a `needs-human` mark ever reads it (dispatched comments no
+                    # longer reactivate on edit, #1309), but storing it unconditionally is
+                    # harmless and closes the answered-by-edit race for parked comments.
                     entry["acted_identity"] = [args.acted_edit_id]
             state["last_action"] = f"{args.disposition} {label} {item_id}"
     print(json.dumps({"marked": args.currency_key or args.check or args.thread or args.comment}))
 
 
+WATCH_BOOTSTRAP_FLAGS = ("--state-dir", "--invocation-id", "--session-started-at",
+                         "--invocation-budget-seconds")
+WATCH_BOOTSTRAP_HINT = """\
+watch cannot start a babysit run: it only arms the change detector for an
+invocation that was already bootstrapped by a snapshot --start-invocation run
+(the ce-babysit-pr Step 2 bootstrap).
+To recover, invoke the ce-babysit-pr skill through your harness's callable
+skill mechanism with this PR: its instructions own the bootstrap, arming,
+marks, and stop protocol. Do not drive pr-snapshot directly outside that skill.
+Never mint the bootstrap values yourself; they come from the skill's
+bootstrap snapshot."""
+
+
+class _WatchHintingParser(argparse.ArgumentParser):
+    # A bare `watch --pr N` is the observed illegal start path (an agent arming the
+    # detector without the Step 2 bootstrap). Keep the fail-closed exit 2, but make
+    # the refusal carry its own recovery path instead of a raw usage dump.
+    def error(self, message):
+        if (self.prog.endswith(" watch") and "required" in message
+                and any(flag in message for flag in WATCH_BOOTSTRAP_FLAGS)):
+            self.print_usage(sys.stderr)
+            self.exit(2, f"{self.prog}: error: {message}\n\n{WATCH_BOOTSTRAP_HINT}\n")
+        super().error(message)
+
+
 def main():
     p = argparse.ArgumentParser(prog="pr-snapshot")
-    sub = p.add_subparsers(dest="cmd", required=True)
+    sub = p.add_subparsers(dest="cmd", required=True, parser_class=_WatchHintingParser)
 
     s = sub.add_parser("snapshot")
     s.add_argument("--pr", type=int, required=True)
@@ -2142,7 +2550,7 @@ def main():
     m.add_argument("--check", default=None)
     m.add_argument("--comment", default=None)
     m.add_argument("--fetch-file", default=None)  # reuse the tick's fetch for the at-mark baseline
-    m.add_argument("--acted-edit-id", default=None)  # snapshot-time edit_id baseline for a --comment
+    m.add_argument("--acted-edit-id", default=None)  # snapshot-time edit_id baseline; read only by needs-human comment reactivation (#1309)
     m.add_argument("--currency-key", default=None,
                    help="exact branch-currency observation key emitted by snapshot")
     m.add_argument("--currency-disposition",
@@ -2162,6 +2570,8 @@ def main():
     w.add_argument("--state-dir", required=True)
     w.add_argument("--interval", type=float, default=150.0, help="poll cadence seconds")
     w.add_argument("--settle-seconds", type=float, default=300.0, help="quiet window before a merge-ready wake")
+    w.add_argument("--blocked-external-drain-seconds", type=float, default=None,
+                   help="head-scoped review-quiet bound before a gated-CI handback")
     w.add_argument("--stop-file", default=None, help="path whose existence stops the watch")
     w.add_argument("--fetch-file", default=None)
     w.add_argument("--invocation-id", required=True,
@@ -2177,6 +2587,9 @@ def main():
             and args.invocation_budget_seconds is not None
             and args.invocation_budget_seconds <= 0):
         p.error("--invocation-budget-seconds must be positive")
+    if (args.cmd == "watch" and args.blocked_external_drain_seconds is not None
+            and args.blocked_external_drain_seconds <= 0):
+        p.error("--blocked-external-drain-seconds must be positive")
     if args.cmd == "snapshot":
         starting = args.start_invocation or args.reset_session
         continuing = args.continue_invocation
