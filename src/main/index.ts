@@ -2,6 +2,9 @@ import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { registerIpc } from './ipc'
+
+let shutdown: (() => Promise<void>) | null = null
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -53,6 +56,8 @@ if (!gotLock) {
       optimizer.watchWindowShortcuts(window)
     })
 
+    const session = registerIpc()
+    shutdown = session.quit
     createWindow()
 
     app.on('activate', () => {
@@ -60,6 +65,14 @@ if (!gotLock) {
     })
   })
 }
+
+app.on('before-quit', (event) => {
+  if (!shutdown) return
+  event.preventDefault()
+  const stop = shutdown
+  shutdown = null
+  void stop().finally(() => app.quit())
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
