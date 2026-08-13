@@ -1,16 +1,30 @@
 ---
 name: ce-work
-description: Execute a plan or concrete work prompt end-to-end. Use when implementing from docs/plans, a spec path, or a clear build request; use ce-debug for open-ended bugs. Standalone use owns the shipping tail; outer orchestrators pass `mode:return-to-caller [implementation_engine:<compact-json>] [implementation_run:<safe-id>] <plan path>` for implementation, recovery, and local verification only.
+description: Execute a plan or concrete work prompt end-to-end. Use when implementing from a plan document, a spec path, or a clear build request; use ce-debug for open-ended bugs. Standalone use owns the shipping tail; outer orchestrators pass `mode:return-to-caller [implementation_engine:<compact-json>] [implementation_run:<safe-id>] <plan path>` for implementation, recovery, and local verification only.
 argument-hint: "[Plan path, work description, or recovery request with run id; blank uses latest] | [mode:return-to-caller [implementation_engine:<compact-json>] [implementation_run:<safe-id>] <plan path> for outer orchestrators]"
 ---
 
 # Work Execution Command
 
+## Setup
+
+Run this once at the start of this invocation, before any subagent dispatch, and follow the directives it prints — except where one conflicts with this skill's own rules on asking the user questions, whether those rules are scoped to a non-interactive mode or apply in every mode, in which case this skill's rules win and no blocking question is asked. Run the fence exactly as written, as its own command: do not pipe or filter it (no `head`, `tail`, or `grep`), do not truncate its output, and do not bundle it into a batch with other commands. Its output opens with a `=== skill context` header and ends with `CE_CONTEXT_END`; if you received one of those lines without the other, the output was truncated — rerun the fence verbatim once. That recovery is the only rerun: otherwise do not rerun it within the same invocation; a later invocation of this or any other skill runs its own. If no Node runtime is available the skill proceeds unchanged.
+
+```bash
+SKILL_DIR="<absolute path of the directory containing the SKILL.md you just read>";
+NODE="$(for c in node nodejs; do command -v "$c" >/dev/null 2>&1 && "$c" -e '' >/dev/null 2>&1 && { echo "$c"; break; }; done)";
+if [ -n "$NODE" ]; then
+"$NODE" "$SKILL_DIR/scripts/context.mjs" || echo "context script failed; continue with the skill's normal behavior";
+else
+echo "no Node runtime; continue with the skill's normal behavior";
+fi
+```
+
 ## Outcome
 
 - **Result:** A fully implemented, locally verified change set from a plan, specification, or concrete work prompt.
 - **Next consumer:** In standalone use, the shipping workflow takes the verified change through review and delivery. In Return-to-Caller Mode, the invoking workflow receives the structured implementation and verification envelope and owns its remaining gates.
-- **Done:** Every in-scope task is complete, required verification evidence is recorded, relevant checks pass, and the run reaches either its owned shipping handoff, a complete return envelope, or an explicit blocker.
+- **Done:** Every in-scope task is complete, required verification evidence is recorded, relevant checks pass, and the run reaches either its owned shipping handoff (with a code-review receipt or explicit skip phrase — see Phase 3-4), a complete return envelope, or an explicit blocker.
 - **Intent:** Finish the requested feature without renegotiating the plan or transferring canonical integration authority. Workers receive bounded units; the host orchestrator inspects actual changes and owns authoritative verification and canonical commits.
 
 ## Input Document
@@ -18,6 +32,18 @@ argument-hint: "[Plan path, work description, or recovery request with run id; b
 The **input document** for this run is the input this skill was invoked with — present in the current prompt or conversation, whether the user provided it directly or a calling skill passed it (e.g. `lfg` in `mode:pipeline`, which passes a plan path). It may be a plan or spec path, a `mode:` token followed by a path, or a bare work prompt. The rest of this skill refers to it as `<input_document>`; if nothing was provided, treat `<input_document>` as blank.
 
 Invocation origin is not observable or relevant: apply the same source-resolution rules whether the user invoked `ce-work` explicitly or the host selected it automatically.
+
+## Artifact Root
+
+This skill discovers plans under `<root>/plans/` and may write review residuals under `<root>/residual-review-findings/`. Resolve `<root>` when you first compose a `<root>/` path (per the block below), never before you need it. A write to `<root>/...` and a read of `<root>/solutions/` both count as composing a `<root>/` path, so either one triggers resolution; only a run that touches no `<root>/` path at all -- a scratch-only or no-repo flow -- skips it; pass the resolved path to any subagent, not the config.
+
+<!-- ce-docs-root:start -->
+**Resolve the CE artifact root `<root>` before composing any artifact path.**
+
+- **Read** `docs_root` from `<repo-root>/.compound-engineering/config.yaml` only (`<repo-root>` = `git rev-parse --show-toplevel`). Do not read it from `config.local.yaml`. Unset -> `<root>` is `docs`, exactly as before.
+- **Validate** a set value: a repo-relative directory whose real, symlink-resolved path stays inside the repo and is neither the repo root nor under `.git/`. Otherwise stop with an error naming `docs_root` and the value -- never fall back to `docs`.
+- **Use** `<root>` as the sole artifact location: create it if absent, compose each path as `<root>/<subdir>` with this skill's own subdirectory, and never also read `docs`.
+<!-- ce-docs-root:end -->
 
 ## Execution Workflow
 
@@ -35,7 +61,15 @@ When a valid `implementation_engine:` binding is present without recovery, **pre
 
 **Resolve a session-carried plan before blank or bare-prompt classification.** When the current request is continuation language such as "proceed" and the conversation identifies exactly one current plan/spec path that was authored, selected, or accepted for this work, treat that path as `<input_document>`. If multiple session plans are plausible, ask which one; do not choose by recency. Do not replace a concrete new work request with an unrelated earlier plan. This rule depends only on visible conversation state, never on whether invocation was explicit or automatic.
 
-**Every non-recovery code path must resolve its implementation engine before execution.** Once metadata or prompt triage identifies code work, but before reading active implementation units, creating tasks, writing files, or committing, read `references/execution-engines.md` and perform its route-resolution gate. This applies with or without an `implementation_engine:` carrier: inspect `.compound-engineering/config.local.yaml` when it exists, because standing configuration remains eligible in both standalone and carrierless Return-to-Caller Mode. Do not choose inline/native execution until that gate has ruled out or validly exhausted the applicable higher-authority routes.
+**Every non-recovery code path must resolve its implementation engine before execution.** Once metadata or prompt triage identifies code work, but before reading active implementation units, creating tasks, writing files, or committing, read `references/execution-engines.md` and perform its route-resolution gate. This applies with or without an `implementation_engine:` carrier: apply the ordinary-key rule below to `work_engine_mode` and `work_engine_preferences` independently, because standing configuration remains eligible in both standalone and carrierless Return-to-Caller Mode. Do not choose inline/native execution until that gate has ruled out or validly exhausted the applicable higher-authority routes.
+
+<!-- ce-config-layers:start -->
+**Resolve ordinary CE yaml keys from the two repo files.**
+
+- **Read** `<repo-root>/.compound-engineering/config.local.yaml`, then `config.yaml` (`<repo-root>` = `git rev-parse --show-toplevel`). Missing files are skipped. Gitignore does not change resolution.
+- **Win** with the first active (non-commented) value. For scalars, empty is unset; an invalid value continues to the next layer, then the skill default. For lists and maps, a present key — including an empty list or map — replaces the whole key.
+- **Do not** use this rule for `docs_root` — that key is `config.yaml` only.
+<!-- ce-config-layers:end -->
 
 Determine how to proceed based on what was provided in `<input_document>` (after any mode token is stripped).
 
@@ -49,7 +83,7 @@ Determine how to proceed based on what was provided in `<input_document>` (after
 - If it carries `execution: knowledge-work`, this is a **non-code plan** — read `references/non-code-execution.md` and follow that carve-out instead of the rest of this workflow.
 - Otherwise (legacy plan, field absent, or `execution: code`) -> continue to Phase 1 and run the normal code lifecycle.
 
-**Blank invocation latest-plan discovery:** when `<input_document>` is blank, glob `docs/plans/*.md` and `docs/plans/*.html`, inspect metadata for the newest candidates, and only auto-select a plan that is `artifact_readiness: implementation-ready` plus `execution: code` or a legacy code plan. Stop instead of silently executing when the newest matching artifact is requirements-only, `execution: knowledge-work`, an approach-plan, or an unclassified universal/answer-seeking output. Ask for an explicit path or a `ce-plan` enrichment step. **Superseded sibling:** if a requirements-only candidate has a same-basename file in the other format (`<basename>.md` / `<basename>.html`) that is `implementation-ready`, a format conversion left the requirements-only copy stale — select the implementation-ready sibling and execute it rather than stopping.
+**Blank invocation latest-plan discovery:** when `<input_document>` is blank, glob `<root>/plans/*.md` and `<root>/plans/*.html`, inspect metadata for the newest candidates, and only auto-select a plan that is `artifact_readiness: implementation-ready` plus `execution: code` or a legacy code plan. Stop instead of silently executing when the newest matching artifact is requirements-only, `execution: knowledge-work`, an approach-plan, or an unclassified universal/answer-seeking output. Ask for an explicit path or a `ce-plan` enrichment step. **Superseded sibling:** if a requirements-only candidate has a same-basename file in the other format (`<basename>.md` / `<basename>.html`) that is `implementation-ready`, a format conversion left the requirements-only copy stale — select the implementation-ready sibling and execute it rather than stopping.
 
 **Bare prompt** (input is a description of work, not a file path):
 
@@ -75,7 +109,7 @@ Determine how to proceed based on what was provided in `<input_document>` (after
 
 1. **Read Plan and Clarify** _(skip if arriving from Phase 0 with a bare prompt)_
 
-   - For unified plans, size your read. A short plan (lightweight or requirements-only, a screen or two) can be read in full. For a long implementation-ready plan, do **not** read the whole document first — it is expensive and unnecessary. Build a section map, then read only what the active unit needs: metadata, then `Goal Capsule`, `Verification Contract`, `Definition of Done`, the `Implementation Units` heading list, and only the active U-ID section plus referenced R/F/AE/KTD excerpts. Read appendices or unrelated U-IDs only when the active unit cites them. To build the map: in **markdown** scan headings (`rg -n '^#{1,3} ' <plan>` — top-level sections plus `### U<N>.` units); in **HTML** scan the `<h1>`–`<h3>` heading elements and their anchor ids. Match on the stable section names / unit IDs (`Goal Capsule`, `Verification Contract`, `### U<N>.`, …), ignoring HTML wrapper tags — not on a format-specific pattern.
+   - For unified plans, size your read. A short plan (lightweight or requirements-only, a screen or two) can be read in full. For a long implementation-ready plan, do **not** read the whole document first — it is expensive and unnecessary. Build a section map, then read only what the active unit needs: metadata, then `Goal Capsule`, `Verification Contract`, `Definition of Done`, the `Implementation Units` heading list, and only the active U-ID section plus referenced R/F/AE/KTD excerpts and any Product Contract Key Decision whose `Governs R…` links name those Rs (that reverse link is how a product decision's `session-settled:` label reaches you). Read appendices or unrelated U-IDs only when the active unit cites them. To build the map: in **markdown** scan headings (`rg -n '^#{1,3} ' <plan>` — top-level sections plus `### U<N>.` units); in **HTML** scan the `<h1>`–`<h3>` heading elements and their anchor ids. Match on the stable section names / unit IDs (`Goal Capsule`, `Verification Contract`, `### U<N>.`, …), ignoring HTML wrapper tags — not on a format-specific pattern.
    - For legacy plans, read the work document completely. Both formats (`.md`, `.html`) carry the same section names and IDs; HTML just wraps them in semantic elements (`<section>`, `<article>`, etc.).
    - Treat the plan as a decision artifact, not an execution script
    - If the plan includes sections such as `Implementation Units`, `Work Breakdown`, `Requirements` (or legacy `Requirements Trace`), `Files`, `Test Scenarios`, or `Verification`, use those as the primary source material for execution
@@ -159,7 +193,7 @@ Determine how to proceed based on what was provided in `<input_document>` (after
 
 4. **Choose Execution Engine, then Strategy**
 
-   **Route resolution is a mandatory pre-write gate.** Before any implementation write, native worker dispatch, or implementation commit, read `references/execution-engines.md`; inspect applicable live/session/project intent, any typed caller binding, and `.compound-engineering/config.local.yaml` when it exists; then resolve and record the engine. Do not infer native execution merely because no typed carrier was supplied. Native is eligible only after this gate finds no higher-authority cross-model selection or exhausts a `prefer` route under the reference's fallback contract.
+   **Route resolution is a mandatory pre-write gate.** Before any implementation write, native worker dispatch, or implementation commit, read `references/execution-engines.md`; inspect applicable live/session/project intent, any typed caller binding, and `.compound-engineering/config.local.yaml` then `config.yaml` when they exist; then resolve and record the engine. Do not infer native execution merely because no typed carrier was supplied. Native is eligible only after this gate finds no higher-authority cross-model selection or exhausts a `prefer` route under the reference's fallback contract.
 
    First pick the **engine** that runs implementation: inline/subagent, goal-mode, dynamic-workflow, or cross-model execution. When no applicable live intent, typed caller binding, or enabled standing configuration selects cross-model execution, native execution remains the default inline/subagent path. Goal-mode and dynamic-workflow remain limited to implementation-ready unified code plans and are usable only when the host exposes a callable primitive for them — Codex exposes `create_goal` (a skill can start a goal directly), while Claude Code exposes no goal tools, so on Claude Code they are prompt-emission only (never invoked from inside this skill). Prefer dynamic-workflow over goal-mode for large fan-out plans (many independent U-IDs, codebase-wide sweeps, migrations, adversarial cross-checking). The loaded reference defines authority-and-scope route resolution, the ordered standing preference contract, host-capability probe, plan-shape selection table, copyable goal-mode/`ultracode:` prompts, and resume-tail rules. An engine choice never changes tail ownership — after implementation, resume standalone quality gates in normal use, or return the return-to-caller envelope when invoked by `lfg`. Legacy and bare-prompt code work otherwise use the inline/subagent engine directly.
 
@@ -192,8 +226,12 @@ Determine how to proceed based on what was provided in `<input_document>` (after
    - **Shared workspace only** — subagents edit your working directory. Run them serially. Do not infer isolation from the presence of a subagent API; use only a capability the active harness actually exposes.
    - **No subagent mechanism:** run inline.
 
-   **Native dispatch (inline/subagent engines only)** uses your harness's subagent/worker mechanism. Once a unit is selected for cross-model execution, use the loaded controller protocol for that unit; it must not re-enter this ordinary subagent dispatch. Give each native worker:
-   - The plan path plus a **bounded unit packet** and inherited authority — Goal Capsule, Definition of Done, the unit's section, the Verification Contract entries relevant to it, and any referenced R/F/AE/KTD excerpts. A downstream worker may narrow that unit and authority, never broaden either. Do not send "read the whole plan" as the worker prompt. (For a legacy non-unified plan, the plan path for reference is acceptable.)
+   **Native dispatch (inline/subagent engines only)** uses your harness's subagent/worker mechanism. Once a unit is selected for cross-model execution, use the loaded controller protocol for that unit; it must not re-enter this ordinary subagent dispatch.
+
+   **Fresh worker invariant (native subagent dispatch only):** When dispatching an implementation unit to a native subagent worker, create a new worker context with no prior implementation-unit transcript. Bind the worker handle to exactly that unit: it may continue or recover the same unit, but never receive a different unit. Retire each handle after its unit is integrated; never retask it or retain idle implementation workers for reuse. Invoke an explicit close/release operation only when the active harness exposes one and assigns that lifecycle action to the caller. Inline execution creates no worker context or handle, so it has nothing to retire.
+
+   Give each native worker:
+   - The plan path plus a **bounded unit packet** and inherited authority — Goal Capsule, Definition of Done, the unit's section, the Verification Contract entries relevant to it, any referenced R/F/AE/KTD excerpts, **plus any Product Contract Key Decision whose `Governs R…` links name the unit's cited R-IDs** (its `session-settled:` annotation reaches the worker only through this reverse link — cited KTDs alone carry only planning-decision labels). A downstream worker may narrow that unit and authority, never broaden either. Do not send "read the whole plan" as the worker prompt. (For a legacy non-unified plan, the plan path for reference is acceptable.)
    - The unit's Goal, Files, Approach, Execution note, Patterns, Test scenarios, Verification, and any resolved deferred questions for it.
    - Instruction to check whether the unit's test scenarios cover all applicable categories (happy paths, edge cases, error paths, integration) and supplement gaps before writing tests.
    - **Instruction to choose the unit's evidence strategy and gather the evidence** (see Evidence Strategy in Phase 2) — for behavior-bearing changes, honor the Execution note and default to proof-first or characterization-first: create/update/strengthen the test and observe the red failure or characterization baseline **before** changing production code. The worker is the only party that witnesses this, so it must capture it as it goes.
@@ -204,16 +242,15 @@ Determine how to proceed based on what was provided in `<input_document>` (after
 
    **Permission mode:** Omit the `mode` parameter when dispatching subagents so the user's configured permission settings apply. Do not pass `mode: "auto"` — it overrides user-level settings like `bypassPermissions`.
 
-   **After each serial inline/subagent unit:** review the diff against the unit's scope and `Files:`, run the relevant tests, fix before dispatching the next (never on a broken tree), record the unit's verification evidence from the worker's return (for the Phase 2 `verification_evidence` roll-up), update the task list (never edit the plan body — progress lives in commits), and commit. Then dispatch the next unit.
+   **After each serial inline/subagent unit:** review the diff against the unit's scope and `Files:`, run the relevant tests, fix before starting the next (never on a broken tree), record the unit's verification evidence (from the worker's return when a worker ran), update the task list (never edit the plan body — progress lives in commits), and commit. If the unit used a native subagent worker, retire its handle (closing/releasing it only when the harness exposes that operation and assigns that lifecycle action to the caller), then dispatch the next subagent unit in a new worker context. An inline unit has no worker handle to retire; start the next unit directly.
 
    **After a parallel inline/subagent batch — the orchestrator integrates; never trust the handoff summary alone:**
    1. Wait for every worker in the batch to finish.
    2. **Inspect the actual tree, not reported paths.** Determine what each worker really changed (`git status`/diff in its workspace or the shared dir). Reported paths are a hint; declared `Files:` are often incomplete — workers create/modify files the plan didn't anticipate.
    3. **Detect real collisions and semantic contention** — compare actual paths plus shared contracts, generated/config surfaces, and verification effects. A clean merge is not proof of compatibility. Preserve or re-run colliding units on the advancing canonical base; never blind-merge them.
-   4. **Review, test, and commit each unit in dependency order — the orchestrator owns commits.** Integrate one result, inspect actual scope, run authoritative verification, and create its canonical commit before considering the next. Revalidate every remaining result against the advancing canonical tree. Capture each worker's returned verification evidence into the run's `verification_evidence` roll-up — if a worker omitted it, re-derive what the tree allows and mark the rest as unverified rather than fabricating a red-before-implementation observation the worker never reported.
+   4. **Review, test, commit, and retire each unit in dependency order — the orchestrator owns commits.** Integrate one result, inspect actual scope, run authoritative verification, create its canonical commit, then immediately retire that unit's worker before considering the next. Never send the retired handle another implementation unit or keep it in an orchestrator-managed idle pool. Invoke an explicit close/release operation only when the harness exposes it and assigns that lifecycle action to the caller; otherwise completion is the worker's release boundary. Clean up an isolated workspace only when the harness assigns that cleanup to the caller and only after proving the unit's work was integrated — never infer manual cleanup commands from the provider name. Revalidate every remaining result against the advancing canonical tree. Capture each worker's returned verification evidence into the run's `verification_evidence` roll-up — if a worker omitted it, re-derive what the tree allows and mark the rest as unverified rather than fabricating a red-before-implementation observation the worker never reported.
    5. Update the task list (progress lives in the commits).
-   6. **Release the workers** — close/clean up each worker handle so it stops holding a concurrency slot or leaving orphans (e.g., Codex `close_agent`; for a Claude per-worker worktree: `git worktree unlock <path>` → `git worktree remove <path>` → `git branch -d <branch>`). These isolated worktrees are peers invisible to any outer orchestrator (e.g., Orca), so cleanup is entirely ce-work's.
-   7. Dispatch the next dependency layer.
+   6. Dispatch the next dependency layer only after every unit in the batch has been integrated and its worker retired. Any remaining isolated-workspace cleanup follows the active harness's ownership and lifecycle contract.
 
    **Per-harness integration (examples — the universal flow above is the contract):**
    - **Harness-owned worktree/branch:** integrate one branch in dependency order, verify, and commit before the next; on conflict abort and re-run or explicitly resolve that unit against the advanced tree.
@@ -282,9 +319,9 @@ Before implementing the first task, you must read `references/implementation-loo
 
    Don't simplify after every single unit — early patterns may look duplicated but diverge intentionally in later units. Wait for a natural phase boundary or when you notice accumulated complexity.
 
-   If **`ce-simplify-code`** is available, invoke it at phase boundaries (especially before Phase 3 when the diff is >=30 lines). Otherwise, review the changed files yourself for reuse and consolidation opportunities.
+   If **`ce-simplify-code`** is available, invoke it at phase boundaries (especially before Phase 3 when the accumulated cluster has >=30 substantive changed code lines — count human-authored code, not total diff lines, so a mostly test-fixture/config/generated/mechanical cluster does not trip the gate). Otherwise, review the changed files yourself for reuse and consolidation opportunities.
 
-   When the plan carries `session-settled:`-labeled KTDs, pass the plan path as structure-pin context, not as the simplification scope, with the one-line constraint that labeled KTDs are structure pins the simplification must preserve (e.g., deliberate duplication stays duplicated).
+   When the plan carries `session-settled:`-labeled KTDs or Key Decisions, pass the plan path as structure-pin context, not as the simplification scope, with the one-line constraint that labeled entries are structure pins the simplification must preserve (e.g., deliberate duplication stays duplicated).
 
 6. **Figma Design Sync** (if applicable)
 
@@ -314,7 +351,12 @@ Before implementing the first task, you must read `references/implementation-loo
 
 When all Phase 2 tasks are complete and execution transitions to quality check, you must read `references/shipping-workflow.md` for the full shipping workflow. Do not skip this.
 
-**Code review: one portable path.** Review with `ce-code-review`, which self-sizes (lite roster for small low-risk code-only diffs, full roster otherwise). No harness-native review detection and no escalation tiers — the size/sensitive-surface judgment lives inside `ce-code-review`. Skip dedicated review only for a purely mechanical diff (formatting, dep-bumps, lint-only, generated). Full rules (autonomous Residual Gate, infra fallback) in `shipping-workflow.md`.
+**Code-review completion gate (standalone shipping only — default on).** This standalone run is **not done** — and must not call `ce-commit-push-pr` / `ce-commit` or report ship-complete — until exactly one of:
+
+1. **Review receipt:** you invoked `ce-code-review` through the host's normal skill-invocation mechanism and hold a **completed** receipt — `mode:agent` JSON with `status: complete` plus `artifact_path` or `run_id`, or default-mode markdown with Actionable Findings, Coverage, and Verdict — then ran apply/residuals per `shipping-workflow.md`. Do **not** treat `status: failed`, `degraded`, or `skipped` as a completed receipt even if `artifact_path`/`run_id` is present; those enter the unavailable path in `shipping-workflow.md`; or
+2. **Explicit skip phrase** in the shipping summary, exactly one of: `Code review: skipped (mechanical diff)`, `Code review: skipped (ce-code-review unavailable)`, or (interactive only, after a real harness-native review ran because `ce-code-review` could not) `Code review: harness-native fallback`, each with a one-line reason.
+
+**Mechanical** means only formatting, dependency-version bumps, lint-only fixes, or generated artifacts — including multi-file mechanical-only diffs (e.g. package manifest + lockfile, formatter output across files). **Not mechanical:** behavior-bearing work (single- or multi-file), control-flow/error-class/tests-for-behavior changes, or applying external/prior review findings. **Never substitute** mental self-review, "findings already applied," or ad-hoc skimming. Harness-native `/review` alone is **not** a substitute when `ce-code-review` can load; it only satisfies the gate via the `harness-native fallback` phrase after the documented unavailable path. Full path lives in `shipping-workflow.md`. This gate does **not** apply in Return-to-Caller Mode — the caller owns review.
 
 **Review is two steps — review, then fix.** `ce-code-review` is review-only. It returns findings (markdown or `mode:agent` JSON); it never edits the checkout, commits, or applies fixes.
 
@@ -350,7 +392,7 @@ Return:
 - `plan_checkpoint`: the disclosed checkpoint commit when the selected plan was the only canonical dirt, otherwise `null`
 - `blockers`
 - `recovery_path`: preserved owner-checked run/workspace location when recovery remains, otherwise `null`
-- `settled_decision_conflicts`: conflicts with `session-settled:`-labeled KTDs encountered during implementation — each entry names the KTD, the evidence, and how it was routed (proceeded-and-flagged vs blocker); empty when none
+- `settled_decision_conflicts`: conflicts with `session-settled:`-labeled KTDs or Key Decisions encountered during implementation — each entry names the labeled entry, the evidence, and how it was routed (proceeded-and-flagged vs blocker); empty when none
 - `behavior_change`: whether behavior-bearing code changed
 - `standalone_shipping_skipped: true`
 
@@ -369,14 +411,14 @@ gates.
 
 - Get clarification once at the start, then execute
 - Don't wait for perfect understanding - ask questions and move
-- The goal is to **finish the feature**, not create perfect process
+- The goal is to **finish the feature**, not create perfect process — without dropping the code-review completion gate or other shipping receipts
 
 ### The Plan is Your Guide
 
 - Work documents should reference similar code and patterns
 - Load those references and follow them
 - Don't reinvent - match what exists
-- A KTD carrying a `session-settled:` annotation (classes `user-directed` / `user-approved`) records a decision the user already made — it is not yours to improve. This scopes to labeled KTDs only: details the plan leaves open remain your judgment, and a real defect discovered inside a settled approach is still surfaced at full strength — the label never suppresses defect evidence. If implementation reveals a labeled decision is invalidating-grade unworkable (infeasible, wrong-thing, destructive), that is a genuine blocker: surface it rather than silently working around or "fixing" the decision
+- A KTD or Product Contract Key Decision carrying a `session-settled:` annotation (classes `user-directed` / `user-approved`) records a decision the user already made — it is not yours to improve. A product decision's label arrives through the Key Decision whose `Governs R…` links name your unit's Rs, not through a KTD. This scopes to labeled entries only: details the plan leaves open remain your judgment, and a real defect discovered inside a settled approach is still surfaced at full strength — the label never suppresses defect evidence. If implementation reveals a labeled decision is invalidating-grade unworkable (infeasible, wrong-thing, destructive), that is a genuine blocker: surface it rather than silently working around or "fixing" the decision
 
 ### Test As You Go
 
@@ -386,13 +428,13 @@ gates.
 
 ### Quality is Built In
 
-- Review every non-mechanical diff with `ce-code-review` (it self-sizes; see `shipping-workflow.md`)
+- Standalone shipping holds a `ce-code-review` receipt or an explicit fixed-phrase skip before commit/PR (completion gate in Phase 3-4; details in `shipping-workflow.md`)
 
 ### Ship Complete Features
 
 - Mark all tasks completed before moving on
 - Don't leave features 80% done
-- A finished feature that ships beats a perfect feature that doesn't
+- A finished feature that ships beats a perfect feature that doesn't — ship still requires the review receipt or skip phrase; silent unreviewed ship is not finished
 
 ## Common Pitfalls to Avoid
 
@@ -402,5 +444,5 @@ gates.
 - **Testing at the end** - Test continuously or suffer later
 - **Forgetting to track progress** - Update task status as you go or lose track of what's done
 - **80% done syndrome** - Finish the feature, don't move on early
-- **Skipping review without reason** — review every non-mechanical diff with `ce-code-review`; skip only for a purely mechanical diff or when it is genuinely unavailable, and document the skip reason
+- **Skipping review without a receipt or fixed skip phrase** — standalone shipping is not done until a `ce-code-review` receipt exists or the shipping summary carries an exact skip phrase; mental self-review and "already applied external findings" do not count
 - **Re-scoping the plan into human-time phases** - The plan's Implementation Units define the scope of execution. Do not estimate human-hours per unit, propose multi-day breakdowns, or ask the user to pick a subset of units for "this session". Agents execute at agent speed, and context-window pressure is addressed by subagent dispatch (Phase 1 Step 4), not by phased sessions. If a plan-file input is genuinely too large for a single execution, say so plainly and suggest the user return to `ce-plan` to reduce scope — don't invent session phases as a workaround. For bare-prompt input, Phase 0's Large routing already handles oversized work

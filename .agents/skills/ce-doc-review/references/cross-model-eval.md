@@ -81,7 +81,7 @@ PATH — and cross-host per the repo's eval default: Claude Code AND Codex.
    scope. Call it independent only when serving families are attestably
    different. A failed route never changes recipients internally; any retry is
    a new host decision requiring a new disclosure and sanction.
-   Headless mode → no user-facing prose about the pass (the script still emits the
+   Non-interactive mode → no user-facing prose about the pass (the script still emits the
    stderr egress audit log).
 
 9. **Non-blocking (R11).** With the peer CLI absent/unauthed, or with the fixed
@@ -112,7 +112,8 @@ PATH — and cross-host per the repo's eval default: Claude Code AND Codex.
 12. **Bounded waits + aggregate deadline reap (lifecycle R5).** Assert the
     orchestrator polls outstanding jobs between waves with bounded
     `wait --max-secs` calls; at synthesis it loops bounded `wait` until every
-    job is terminal **or 610s from the final `start`**, then `reap`s each
+    job is terminal **or the shared peer deadline from the final `start`**,
+    then `reap`s each
     nonterminal job, runs one final collection pass, and folds in the `done`
     artifacts.
 

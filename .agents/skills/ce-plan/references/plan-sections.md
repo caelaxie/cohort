@@ -158,7 +158,7 @@ vs. genuine skip cases:
 
 When skipping the plan doc, the work proceeds directly to `ce-work` or to
 implementation, and any decisions made along the way land in the commit
-message or `docs/solutions/` if they're worth carrying forward.
+message or `<root>/solutions/` if they're worth carrying forward.
 
 ## Implementation-ready hard floor
 
@@ -210,6 +210,58 @@ These sections are present when they carry information that isn't covered
 elsewhere. The test is not "is this a substantial plan?" — it is
 *"does this specific plan have content this section would surface?"* Filling
 a section with placeholder prose is worse than omitting it.
+
+The first five entries below carry the Product Contract's product framing —
+what is being built and why. Later entries mix Product Contract subsections
+(Scope Boundaries, Open Questions, Acceptance Examples, Sources) with
+Planning Contract ones; the hard floor above remains authoritative for which
+section sits under which contract. Problem Frame is unconditional; the other four fire on their own tests. A plan
+that skips all four conditional framing entries has usually inherited its
+framing from an upstream Product Contract — check before concluding none of
+them fire.
+
+- **Problem Frame** — the hard floor above contains it unconditionally, so
+  this entry governs its depth, never whether to include it. Give it
+  paragraphs when motivation isn't obvious from Summary alone; keep it to a
+  line or two when the motivation was settled upstream and more would only
+  echo the origin document. Backward-looking / situational. Does NOT restate
+  the proposal; the remedy lives in Summary.
+
+- **Key Decisions** — include when the plan carries product-level choices
+  that constrain the Requirements below, whether made during planning (scope
+  narrowings, defaults chosen against a real alternative, framing the user
+  picked) or inherited from an upstream Product Contract, which Phase 0.3
+  requires carrying forward with its rationale. Each entry is a provenance
+  index entry, not a second statement of the rule: the decision in bold, at
+  most one line of rationale, and exact `Governs R5, R7` links when it
+  constrains specific requirements. The normative text lives on the governed
+  Rs. Session-settled annotations follow the rules under "ID and content
+  rules" below. Distinct from Planning Contract's Key Technical Decisions,
+  which record how-level choices; a product decision belongs here, and a KTD
+  cites it rather than mirroring it. Skip only when no such
+  choice exists on any side: every requirement follows directly from the
+  request, any upstream Product Contract weighed no alternatives, and the
+  session settled none. A `session-settled:` decision always keeps the
+  section — plan-write and the routing table both require its labeled entry
+  to live here.
+
+- **Success Criteria** — include when there are quality / metric / handoff
+  signals that Requirements don't already carry: quantitative metrics ("p95
+  latency under 200ms"), qualitative criteria ("the agent's output reads as
+  one voice"), process / handoff quality ("ce-doc-review can act on this
+  without follow-ups"). Skip when Requirements ARE the success criteria
+  (every R is "done when the R is true").
+
+- **Actors** — include when the work has multi-party behavior (multiple
+  humans, agents, or systems meaningfully involved) that the units must
+  honor. Skip for single-actor work and for plans whose change is internal
+  to one component — most implementation plans skip this.
+
+- **Key Flows** — include when the work has multi-step behavior whose
+  sequencing the units must preserve. Skip when the change is not
+  flow-shaped, or when Requirements and Acceptance Examples together already
+  prevent downstream invention of paths — again, most implementation plans
+  skip this.
 
 - **High-Level Technical Design** — include when the technical approach has
   shape that prose alone doesn't carry well: architecture across components,
@@ -266,7 +318,11 @@ versa.
 
 The agent also picks per artifact:
 
-- Whether Problem Frame merges into Summary
+- Whether Problem Frame merges into Summary — legacy and non-unified plans
+  only. Any `ce-unified-plan/v1` artifact keeps both headings regardless of
+  plan depth: the hard floor names them separately and downstream consumers
+  anchor on them. (Scoped by artifact contract, not by depth — a `Lightweight`
+  plan can still be implementation-ready.)
 - Sub-groupings (Requirements by capability, KTDs by component, Units phased
   into milestones)
 - How much detail each section carries
@@ -290,9 +346,14 @@ Hold every kept section to these:
   goal beneath its rationale. This does not override section roles — Summary
   stays proposal-only, Problem Frame stays motivation-only and never restates
   the remedy.
-- **One idea per sentence.** A Summary is a handful of sentences, not one
-  sentence with five semicolons and four parentheticals. A KTD's rationale is
-  the load-bearing reason, not every reason.
+- **Use an ASD-STE100 Simplified Technical English (STE)-inspired style for
+  technical plan content.** Write short, direct sentences. Keep one decision,
+  action, or condition per sentence, and use one consistent term for each
+  concept. Preserve exact identifiers, paths, commands, protocol names, and
+  domain terms. Shorten sentences, not content: preserve every distinct
+  requirement, qualification, and test scenario. A Summary is a handful of
+  sentences, not one sentence with five semicolons and four parentheticals. A
+  KTD's rationale is the load-bearing reason, not every reason.
 - **A requirement or unit is one sentence of intent plus at most one
   qualifier.** When it would specify two outcomes ("either A or B, the
   implementer decides"), state the intent and send the fork to Open Questions —
@@ -313,10 +374,33 @@ leave it standing as strikethrough or stack a separate "resolutions" layer on
 top of it. Version control holds the history. Stacked strata double the reading
 surface and hide which text is live.
 
+**One owner per rule; cite, don't restate.** A normative rule — a gate, cap,
+threshold, protocol, or output contract — is stated in full at exactly one
+owning entry: product behavior on its R-ID; an implementation choice on its
+KTD. Every other layer cites the owning ID and adds only what is local to
+it — a unit's Approach carries unit-local deltas (files, sequencing,
+patterns), never a re-derivation of the protocol its cited Rs and KTDs own.
+Linked projections are sanctioned (an AE restating behavior under
+`Covers R…`, a Flow citing the Rs it sequences). **Unlinked sibling
+restatement** — the same rule written out again in a KTD, Scope bullet, or
+Approach with no ID link — is the defect: each copy drifts independently.
+When linked layers disagree, authority is typed: the **R wins on product
+behavior**; the **KTD wins on implementation mechanism** within its cited R
+constraints; a unit overrides neither; AEs and Flows illustrate and
+sequence, never amend.
+
+**Bind external authorities; don't summarize them.** When a requirement,
+KTD, or unit adopts an external document (a field guide, spec, standard),
+state the commitment, cite the path, and record only this work's deltas. A
+multi-sentence summary of the cited document is restatement of an owner that
+lives outside the doc.
+
 **Named test, run before the plan is declared written:** could the implementer
 find a contradiction in each section in one pass? A sentence carrying more than
-one parenthetical, or an item specifying two outcomes, fails the test — split it
-or defer it.
+one parenthetical, a sentence chaining more than two semicolons, an item
+specifying two outcomes, or a rule stated in full in more than one section
+fails the test — split it (a semicolon chain becomes a list), defer it, or
+replace the duplicate with its owning ID.
 
 ## Plan metadata fields
 
@@ -376,12 +460,18 @@ names; adding new fields is fine, but renaming `origin` to `source` or
 
 These apply regardless of rendering format.
 
-- **Stable IDs.** R-IDs (Requirements), U-IDs (Implementation Units), A-IDs
+- **Stable IDs.** R-IDs (Requirements), U-IDs (Implementation Units),
+  KTD-IDs (Key Technical Decisions, implementation-ready plans), A-IDs
   (if Actors fire), F-IDs (if Flows fire), AE-IDs (if Acceptance Examples
   fire). IDs are stable across plan revisions — never renumber to "clean
   up gaps."
-- **Plain prefix.** `R1.`, `U1.` as bullet prefixes. Do not bold; the prefix
-  is visually distinctive on its own.
+- **Plain prefix.** `R1.`, `U1.`, `KTD1.` as bullet prefixes. Do not bold;
+  the prefix is visually distinctive on its own.
+- **KTD-IDs on implementation-ready plans.** Number Key Technical Decisions
+  (`KTD1.`, next unused number, same never-renumber rule as U-IDs) in newly
+  authored implementation-ready plans, and in an existing plan whenever a
+  KTD is added, split, or first cited by a unit. Untouched unnumbered KTDs
+  in legacy plans stay as they are — readable by label, no mass renumbering.
 - **Repo-relative paths.** Always. Never absolute paths in plan content;
   they break portability across machines, worktrees, teammates.
 - **No process exhaust.** No "captured at Phase X" notes, no `## Next Steps`
@@ -394,8 +484,11 @@ These apply regardless of rendering format.
   Exactly two classes: `user-directed` (the user chose against or between
   surfaced options) and `user-approved` (the agent proposed with the tradeoff
   surfaced; the user assented). An agent never labels its own unexamined
-  proposal. A KTD that instantiates a labeled brainstorm / Product Contract
-  Key Decision inherits the label and cites that decision. The annotation is
+  proposal. A KTD that makes the how-level choice instantiating a labeled
+  Product Contract Key Decision inherits the label and cites the decision's
+  governed R-IDs. Do **not** create a KTD that merely mirrors a Product Key
+  Decision with no new technical choice — the Key Decision plus its
+  `Governs R…` links already own that content. The annotation is
   self-contained — decision, rejected alternative, and one-line reason
   readable without the conversation — and lives inline on the entry: no
   sidecar files, no frontmatter registry, no numeric weights, no lifecycle

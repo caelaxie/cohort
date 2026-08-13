@@ -23,7 +23,7 @@
 #                   promote agreement.
 #   <candidates>    comma-separated ordered provider keys to consider, e.g.
 #                   "codex,claude,grok,composer". The skill front-loads any
-#                   resolved preference (conversation > config.local.yaml >
+#                   resolved preference (conversation > CE config cascade >
 #                   project-instructions-in-context); the script excludes the
 #                   host, applies the CROSS_MODEL_PEERS allowlist, and walks this
 #                   order picking the first available provider(s) up to
@@ -155,9 +155,13 @@ MODEL_ACTUAL="unverified"
 extract_model_receipt() {   # <route>; reads the envelope in $PEERLOG, sets MODEL_ACTUAL
   MODEL_ACTUAL="unverified"
   [ "$1" = "claude" ] || return 0
-  local requested actual prefix matched
+  local requested actual prefix matched envelope
   requested="$(route_model claude)"
   prefix="$(expected_model_prefix "$requested")"
+  # stream-json is NDJSON: modelUsage lives on the terminal type=result event
+  # (same pattern as elevation-dispatch). Buffered --output-format json is one
+  # object — whole-file jq still works when no result event exists.
+  envelope="$(grep -a '"type":"result"' "$PEERLOG" 2>/dev/null | tail -1 || true)"
   # jq `keys` is sorted, so keys[0] is the alphabetically-first model, not
   # necessarily the one that served the run (a multi-key envelope can also carry
   # an auxiliary model's usage). Prefer a key matching the requested family's
@@ -168,13 +172,21 @@ extract_model_receipt() {   # <route>; reads the envelope in $PEERLOG, sets MODE
   if [ -n "$prefix" ]; then
     # first modelUsage key matching the expected family prefix (jq-native, no
     # external `head`: the route sandbox may not carry coreutils on PATH).
-    matched="$(jq -r --arg p "$prefix" 'first((.modelUsage // {} | keys[] | select(startswith($p)))) // empty' "$PEERLOG" 2>/dev/null)"
+    if [ -n "$envelope" ]; then
+      matched="$(printf '%s' "$envelope" | jq -r --arg p "$prefix" 'first((.modelUsage // {} | keys[] | select(startswith($p)))) // empty' 2>/dev/null)"
+    else
+      matched="$(jq -r --arg p "$prefix" 'first((.modelUsage // {} | keys[] | select(startswith($p)))) // empty' "$PEERLOG" 2>/dev/null)"
+    fi
   fi
   if [ -n "$matched" ]; then
     MODEL_ACTUAL="$matched"
     return 0
   fi
-  actual="$(jq -r '.modelUsage // empty | keys[0] // empty' "$PEERLOG" 2>/dev/null)"
+  if [ -n "$envelope" ]; then
+    actual="$(printf '%s' "$envelope" | jq -r '.modelUsage // empty | keys[0] // empty' 2>/dev/null)"
+  else
+    actual="$(jq -r '.modelUsage // empty | keys[0] // empty' "$PEERLOG" 2>/dev/null)"
+  fi
   if [ -z "$actual" ]; then
     log "model receipt absent/unparseable on claude route; recording unverified"
     return 0
@@ -201,14 +213,20 @@ adapter_argv() {
       # web / Skill denied. Diff is embedded (Bash denied), so the peer needs no
       # shell. Keep Read — do NOT use --tools "" (tool-less) like doc-review; this
       # pass is in-tree by design.
+      # stream-json + --verbose: PEERLOG grows mid-run so run_timeout_cmd idle
+      # detection works; --json-schema still composes (#1270 measurement).
       printf '%s\0' claude -p --model "$(route_model claude)" --effort high --permission-mode dontAsk
       [ -z "${LARGE_DIFF_CONTEXT_DIR:-}" ] || printf '%s\0' --add-dir "$LARGE_DIFF_CONTEXT_DIR"
       printf '%s\0' --disallowedTools Edit Write NotebookEdit Bash Task WebFetch WebSearch Skill 'mcp__*' \
-        --max-turns "$PEER_MAX_TURNS" --no-session-persistence --json-schema "$SCHEMA_REF" --output-format json
+        --max-turns "$PEER_MAX_TURNS" --no-session-persistence --json-schema "$SCHEMA_REF" \
+        --output-format stream-json --verbose
       ;;
     grok-cli)
       # Read allowed (in-tree context); deny writes / shell / subagents / web / MCP.
-      printf '%s\0' grok --prompt-file "$PROMPT_FILE" --model "$(route_model grok-cli)" --effort high \
+      # Schema forces non-streaming json on grok — keep hard-only (no PEERLOG idle).
+      # --verbatim: without it grok offloads a large prompt to a session file and
+      # sends only a preview, spending scarce turns to re-read what it was given.
+      printf '%s\0' grok --prompt-file "$PROMPT_FILE" --verbatim --model "$(route_model grok-cli)" --effort high \
         --cwd "$PEER_WORKDIR" --permission-mode dontAsk
       [ -z "${LARGE_DIFF_CONTEXT_DIR:-}" ] || printf '%s\0' --allow "Read($LARGE_DIFF_CONTEXT_DIR/**)"
       printf '%s\0' --deny Edit --deny Write --deny Bash --deny Task --deny 'mcp__*' \
@@ -219,19 +237,19 @@ adapter_argv() {
       printf '%s\0' cursor-agent -p --model "$(route_model grok-cursor)" --mode ask --trust \
         --sandbox enabled --workspace "$PEER_WORKDIR"
       [ -z "${LARGE_DIFF_CONTEXT_DIR:-}" ] || printf '%s\0' --add-dir "$LARGE_DIFF_CONTEXT_DIR"
-      printf '%s\0' --output-format json
+      printf '%s\0' --output-format stream-json
       ;;
     cursor)
       printf '%s\0' cursor-agent -p --mode ask --trust \
         --sandbox enabled --workspace "$PEER_WORKDIR"
       [ -z "${LARGE_DIFF_CONTEXT_DIR:-}" ] || printf '%s\0' --add-dir "$LARGE_DIFF_CONTEXT_DIR"
-      printf '%s\0' --output-format json
+      printf '%s\0' --output-format stream-json
       ;;
     composer)
       printf '%s\0' cursor-agent -p --model "$(route_model composer)" --mode ask --trust \
         --sandbox enabled --workspace "$PEER_WORKDIR"
       [ -z "${LARGE_DIFF_CONTEXT_DIR:-}" ] || printf '%s\0' --add-dir "$LARGE_DIFF_CONTEXT_DIR"
-      printf '%s\0' --output-format json
+      printf '%s\0' --output-format stream-json
       ;;
     *) return 1 ;;
   esac
@@ -437,16 +455,62 @@ fi
 # Idle cap must exceed the peer's worst-case silent turn: Codex --json is
 # event-line (not token) output, so a slow xhigh reasoning turn (Luna p95 ~242s,
 # max ~419s) can go quiet past a low cap and be reaped before turn.completed.
+#
+# On idle-guarded routes the idle cap -- not the hard cap -- is the liveness
+# guard: a wedged peer stops growing PEERLOG and dies at IDLE_SECS regardless of
+# HARD_SECS. There, HARD_SECS only backstops a peer that stays *productive* past
+# any useful budget, so it must clear the adopted tier's tail by a wide margin.
+# It did not: the benchmark tail (max ~419s) was measured on small single-file
+# diffs, while a large-diff run (PEER_MAX_TURNS up to 40, multi-file semantic
+# divisions) routinely streams past 600s and was reaped mid-review -- burning the
+# full peer spend for no usable output.
+#
+# Claude and cursor-agent routes stream (`stream-json`) so run_timeout_cmd can
+# poll PEERLOG the same way (#1270 quiet-interval note). grok-cli keeps
+# --json-schema which forces buffered json — PEERLOG idle cannot see a wedge, so
+# it alone stays on UNGUARDED_HARD_SECS (hard-only). An explicit
+# CROSS_MODEL_HARD_SECS still overrides both defaults.
+#
+# HARD_SECS is the ONE knob for the whole peer budget: the runner supervisor
+# window and the orchestrator's shared deadline both derive from it (see
+# references/cross-model-review.md), so raising it here raises all three. A
+# smaller effective worker cap on an unguarded route keeps that nesting valid --
+# the inner window may be tighter, never wider.
 IDLE_SECS="${CROSS_MODEL_IDLE_SECS:-480}"
-HARD_SECS="${CROSS_MODEL_HARD_SECS:-600}"
+HARD_SECS="${CROSS_MODEL_HARD_SECS:-1200}"
+UNGUARDED_HARD_SECS="${CROSS_MODEL_HARD_SECS:-600}"
 TO_BIN="$(command -v gtimeout || command -v timeout || true)"
 
+# True while $1 is a live (non-zombie) process. kill -0 succeeds on zombies
+# until wait reaps them, so idle polls must not treat zombies as still running.
+# macOS/BSD often report defunct state as "Z+" (not bare "Z").
+# Match peer-job-runner._pid_running: empty state after ps means not alive
+# (avoids zombie spin). Fall back to kill -0 only when ps itself is missing.
+peer_alive() {
+  local st
+  kill -0 "$1" 2>/dev/null || return 1
+  if ! command -v ps >/dev/null 2>&1; then
+    return 0
+  fi
+  st="$(ps -o state= -p "$1" 2>/dev/null | tr -d ' \n')"
+  [ -n "$st" ] || return 1
+  [ "${st#Z}" = "$st" ]
+}
+
 reap() {
+  # Signal the process group and grace-poll without wait(). The caller alone
+  # wait()s the leader so RUN_SUCCEEDED reflects the real exit status — a second
+  # wait here would fail after we already reaped and mark healthy exits as
+  # timed-out (#1270 Bugbot). No background KILL timer: orphaned timers can
+  # hit recycled PIDs under bun --parallel.
   local pid="$1" grp
-  if kill -TERM -- -"$pid" 2>/dev/null; then grp=1; else kill -TERM "$pid" 2>/dev/null; grp=0; fi
+  if kill -TERM -- -"$pid" 2>/dev/null; then grp=1; else kill -TERM "$pid" 2>/dev/null || true; grp=0; fi
   for _ in 1 2 3 4 5; do
-    if [ "$grp" = 1 ]; then kill -0 -- -"$pid" 2>/dev/null || return 0
-    else kill -0 "$pid" 2>/dev/null || return 0; fi
+    if ! peer_alive "$pid"; then
+      # Leader exited/zombied — sweep any group survivors; caller wait()s.
+      [ "$grp" = 1 ] && kill -KILL -- -"$pid" 2>/dev/null || true
+      return 0
+    fi
     sleep 1
   done
   if [ "$grp" = 1 ]; then kill -KILL -- -"$pid" 2>/dev/null; else kill -KILL "$pid" 2>/dev/null; fi
@@ -461,7 +525,10 @@ on_term() {
   fi
   if [ -n "${ACTIVE_PEER_PID:-}" ]; then
     log "received TERM/INT; reaping peer process group $ACTIVE_PEER_PID"
-    reap "$ACTIVE_PEER_PID" 2>/dev/null || true
+    _term_peer="$ACTIVE_PEER_PID"
+    reap "$_term_peer" 2>/dev/null || true
+    # reap only signals the group; wait reaps the leader so it cannot orphan.
+    wait "$_term_peer" 2>/dev/null || true
     ACTIVE_PEER_PID=""
   fi
   exit 0
@@ -554,8 +621,8 @@ run_codex_cmd() {
   start_heartbeat
   local start last=-1 lastchg now size
   start="$(date +%s)"; lastchg="$start"
-  while kill -0 "$pid" 2>/dev/null; do
-    sleep 5; now="$(date +%s)"; size="$(wc -c <"$PEERLOG" 2>/dev/null || echo 0)"
+  while peer_alive "$pid"; do
+    now="$(date +%s)"; size="$(wc -c <"$PEERLOG" 2>/dev/null || echo 0)"
     [ "$size" != "$last" ] && { last="$size"; lastchg="$now"; }
     if [ $(( now - lastchg )) -ge "$IDLE_SECS" ]; then
       log "codex output idle ${IDLE_SECS}s; reaping peer process group"; reap "$pid"; break
@@ -563,6 +630,9 @@ run_codex_cmd() {
     if [ $(( now - start )) -ge "$HARD_SECS" ]; then
       log "codex exceeded hard cap ${HARD_SECS}s; reaping peer process group"; reap "$pid"; break
     fi
+    # 1s slices so a finished peer is noticed promptly (was sleep-5-first, which
+    # added up to 5s after every short stub / healthy exit).
+    sleep 1
   done
   if wait "$pid" 2>/dev/null; then RUN_SUCCEEDED=true
   else log "peer exited non-zero or timed out"; fi
@@ -577,19 +647,42 @@ run_codex_cmd() {
 }
 
 run_timeout_cmd() {
+  # $1 = stdin file ("" -> /dev/null). $2 = hard cap secs. $3 = "idle" | "no-idle".
+  # Idle-guarded streaming routes (claude / cursor-family) pass HARD_SECS + idle.
+  # grok-cli (buffered schema json) passes UNGUARDED_HARD_SECS + no-idle (#1270).
   RUN_SUCCEEDED=false
   local stdin_file="${1:-}"; [ -n "$stdin_file" ] || stdin_file=/dev/null
+  local hard_cap="${2:-$HARD_SECS}"
+  local idle_mode="${3:-idle}"
   local prev; case "$-" in *m*) prev=1;; *) prev=0;; esac
   set -m
-  if [ -n "$TO_BIN" ]; then
-    ( cd "$PEER_WORKDIR" && exec "$TO_BIN" -k 10 "$HARD_SECS" "${CMD[@]}" ) < "$stdin_file" > "$PEERLOG" 2>"$PEERERR" &
+  if [ "$idle_mode" = "idle" ]; then
+    # Poll PEERLOG ourselves (same shape as run_codex_cmd); no outer timeout(1).
+    ( cd "$PEER_WORKDIR" && exec "${CMD[@]}" ) < "$stdin_file" > "$PEERLOG" 2>"$PEERERR" &
+  elif [ -n "$TO_BIN" ]; then
+    ( cd "$PEER_WORKDIR" && exec "$TO_BIN" -k 10 "$hard_cap" "${CMD[@]}" ) < "$stdin_file" > "$PEERLOG" 2>"$PEERERR" &
   else
-    ( cd "$PEER_WORKDIR" && exec perl -e 'alarm shift; exec @ARGV' "$HARD_SECS" "${CMD[@]}" ) < "$stdin_file" > "$PEERLOG" 2>"$PEERERR" &
+    ( cd "$PEER_WORKDIR" && exec perl -e 'alarm shift; exec @ARGV' "$hard_cap" "${CMD[@]}" ) < "$stdin_file" > "$PEERLOG" 2>"$PEERERR" &
   fi
   local pid=$!
   ACTIVE_PEER_PID="$pid"
   [ "$prev" = 0 ] && set +m
   start_heartbeat
+  if [ "$idle_mode" = "idle" ]; then
+    local start last=-1 lastchg now size
+    start="$(date +%s)"; lastchg="$start"
+    while peer_alive "$pid"; do
+      now="$(date +%s)"; size="$(wc -c <"$PEERLOG" 2>/dev/null || echo 0)"
+      [ "$size" != "$last" ] && { last="$size"; lastchg="$now"; }
+      if [ $(( now - lastchg )) -ge "$IDLE_SECS" ]; then
+        log "peer output idle ${IDLE_SECS}s; reaping peer process group"; reap "$pid"; break
+      fi
+      if [ $(( now - start )) -ge "$hard_cap" ]; then
+        log "peer exceeded hard cap ${hard_cap}s; reaping peer process group"; reap "$pid"; break
+      fi
+      sleep 1
+    done
+  fi
   if wait "$pid" 2>/dev/null; then RUN_SUCCEEDED=true
   else log "peer exited non-zero or timed out"; fi
   reap "$pid" 2>/dev/null || true   # sweep survivors in the provider's own group (see run_codex_cmd)
@@ -598,28 +691,75 @@ run_timeout_cmd() {
 }
 
 # Decode each {...} object in raw stdout via raw_decode (string/escape-aware,
-# unlike brace counting) and keep the last one shaped like findings.
+# unlike brace counting) and keep the last one shaped like findings. Envelope
+# routes nest that object inside a JSON *string* field, so string values that
+# could hold one are re-scanned rather than skipped.
 recover_findings_json() {   # <logfile> <outfile>
-  command -v python3 >/dev/null 2>&1 || return 1
-  python3 - "$1" "$2" <<'PY' 2>/dev/null
+  # Probe execution, not just PATH presence — Windows Store's python3 stub
+  # satisfies `command -v` then exits nonzero (see resolve-python convention).
+  local py
+  py="$(for c in python3 python py; do command -v "$c" >/dev/null 2>&1 && "$c" -c '' >/dev/null 2>&1 && { echo "$c"; break; }; done)"
+  [ -n "$py" ] || return 1
+  "$py" - "$1" "$2" <<'PY' 2>/dev/null
 import sys, json
 txt = open(sys.argv[1], encoding="utf-8", errors="replace").read()
-# Any selectable object carries a literal `"findings"` key; if the raw text has
-# none, there is nothing to recover. Skip the scan — raw_decode probing every
-# `{` is O(n^2) on brace-dense non-findings stdout (error/crash dumps).
-if '"findings"' not in txt: sys.exit(0)
+# Any selectable object carries a `findings` key; if the raw text has none,
+# there is nothing to recover. Skip the scan — raw_decode probing every `{` is
+# O(n^2) on brace-dense non-findings stdout (error/crash dumps). Match the bare
+# word, not `"findings"`: nested inside an envelope's JSON string the key
+# arrives escaped as \"findings\", which the quoted form does not match.
+if 'findings' not in txt: sys.exit(0)
 dec = json.JSONDecoder()
-best, i = None, 0
-while True:
-    j = txt.find('{', i)
-    if j < 0: break
-    try:
-        obj, end = dec.raw_decode(txt, j)
-    except Exception:
-        i = j + 1
-        continue
-    if isinstance(obj, dict) and isinstance(obj.get("findings"), list): best = obj
-    i = end
+# (obj, depth) — depth>0 means recovered from inside a JSON string (envelope .text)
+found = []
+
+def scan(text, depth):
+    i = 0
+    while True:
+        j = text.find('{', i)
+        if j < 0: break
+        try:
+            obj, end = dec.raw_decode(text, j)
+        except Exception:
+            i = j + 1
+            continue
+        if isinstance(obj, dict):
+            # structuredOutput is grok-cli's spelling of the same field.
+            for cand in (obj, obj.get("structured_output"), obj.get("structuredOutput")):
+                if isinstance(cand, dict) and isinstance(cand.get("findings"), list):
+                    found.append((cand, depth))
+            # An envelope route (grok-cli's `.text`) returns the review as a JSON
+            # *string*, whose `{` were never candidates here — raw_decode consumed
+            # the envelope whole and moved past it. Re-scan its strings so a
+            # wrapped review is recovered instead of reported as "no usable
+            # output". Unconditional: an envelope can carry its own empty
+            # `findings` beside the string holding the real one. The `findings`
+            # substring test bounds the nested scan's cost.
+            if depth < 3:
+                for v in obj.values():
+                    if isinstance(v, str) and 'findings' in v:
+                        scan(v, depth + 1)
+        i = end
+
+scan(txt, 0)
+# Nested (string-unwrapped) candidates are the grok .text stub case: order of
+# empty vs populated is not guaranteed, so prefer a populated review. Top-level
+# sequential objects (codex/noisy stdout) keep last-shaped-wins — a final
+# findings:[] after an earlier draft must not revive the draft.
+nested = [o for o, d in found if d > 0]
+top = [o for o, d in found if d == 0]
+if nested:
+    nested_pick = next((o for o in reversed(nested) if o["findings"]), nested[-1])
+    if nested_pick["findings"]:
+        best = nested_pick
+    elif top:
+        best = top[-1]
+    else:
+        best = nested_pick
+elif top:
+    best = top[-1]
+else:
+    best = None
 if best is not None: open(sys.argv[2], "w").write(json.dumps(best))
 PY
   [ -s "$2" ]
@@ -628,8 +768,30 @@ PY
 parse_structured() {   # <logfile> <outfile>
   # Prefer findings-shaped structured_output so a bare envelope does not look "valid"
   # to out_missing_or_invalid and block recovery.
+  # Buffered single-object envelopes (grok-cli json, test stubs).
   jq -e '.structured_output | select((.findings|type)=="array")' "$1" > "$2" 2>/dev/null && return 0
   jq -r '.result // empty' "$1" 2>/dev/null | jq -e 'select((.findings|type)=="array")' > "$2" 2>/dev/null && return 0
+  # grok-cli names its parsed structured output in camelCase, so the snake_case
+  # probe above never matches it and a complete review looks like no output.
+  # Prefer a populated object first: an empty findings array is schema-valid, so
+  # accepting it here would skip .text when the real review only lives there
+  # (empty schema stub + populated .text).
+  jq -e '.structuredOutput | select((.findings|type)=="array" and (.findings|length)>0)' "$1" > "$2" 2>/dev/null && return 0
+  # Envelopes that carry the model's answer verbatim in a string (grok-cli `.text`).
+  # Slurp it: grok emits an empty stub beside the real object, and an unslurped jq
+  # streams BOTH into $2 as unparseable concatenated JSON. Order is not guaranteed,
+  # so prefer a populated review over an empty one rather than taking the last.
+  jq -r '.text // empty' "$1" 2>/dev/null | jq -se '[.[] | select((.findings|type)=="array")] | ([.[] | select(.findings|length>0)] | last) // last | select(. != null)' > "$2" 2>/dev/null && return 0
+  # Empty-but-shaped structuredOutput is a legitimate "peer found nothing" only
+  # after .text had nothing better.
+  jq -e '.structuredOutput | select((.findings|type)=="array")' "$1" > "$2" 2>/dev/null && return 0
+  # stream-json NDJSON: last type=result event (elevation-dispatch pattern).
+  local event
+  event="$(grep -a '"type":"result"' "$1" 2>/dev/null | tail -1 || true)"
+  if [ -n "$event" ]; then
+    printf '%s' "$event" | jq -e '.structured_output | select((.findings|type)=="array")' > "$2" 2>/dev/null && return 0
+    printf '%s' "$event" | jq -r '.result // empty' 2>/dev/null | jq -e 'select((.findings|type)=="array")' > "$2" 2>/dev/null && return 0
+  fi
   recover_findings_json "$1" "$2"
 }
 
@@ -643,7 +805,7 @@ attempt_route() {
     grok-cursor|composer)  note="$(route_model "$route")" ;;
     cursor)                note="auto (serving model unverified)" ;;
   esac
-  log "peer run: provider=$provider route=$route model=$note lens=adversarial read-only in-tree (idle ${IDLE_SECS}s / hard ${HARD_SECS}s); reviewed code/diff may egress to this provider"
+  log "peer run: provider=$provider route=$route model=$note lens=adversarial read-only in-tree (idle ${IDLE_SECS}s / hard ${HARD_SECS}s; grok-cli hard-only ${UNGUARDED_HARD_SECS}s); reviewed code/diff may egress to this provider"
   case "$route" in
     codex)
       compose_prompt_codex
@@ -657,17 +819,17 @@ attempt_route() {
       ;;
     grok-cli)
       compose_prompt_embedded
-      run_timeout_cmd ""
+      run_timeout_cmd "" "$UNGUARDED_HARD_SECS" no-idle
       [ "$RUN_SUCCEEDED" = true ] && parse_structured "$PEERLOG" "$RAW_OUT"
       ;;
     claude)
       compose_prompt_embedded
-      run_timeout_cmd "$PROMPT_FILE"
+      run_timeout_cmd "$PROMPT_FILE" "$HARD_SECS" idle
       [ "$RUN_SUCCEEDED" = true ] && parse_structured "$PEERLOG" "$RAW_OUT"
       ;;
     grok-cursor|cursor|composer)
       compose_prompt_embedded
-      run_timeout_cmd "$PROMPT_FILE"
+      run_timeout_cmd "$PROMPT_FILE" "$HARD_SECS" idle
       [ "$RUN_SUCCEEDED" = true ] && parse_structured "$PEERLOG" "$RAW_OUT"
       ;;
   esac

@@ -134,6 +134,17 @@ For each peer:
    intermediary. Confirm every actual recipient is in the egress allowlist.
 5. Announce the selected target and route in ordinary language before dispatch.
 
+The fixed route passed to the worker accepts exactly these tokens — the worker
+fail-closes on anything else (including route-shaped guesses like `codex-cli`):
+
+| Target | Route token(s) |
+|--------|----------------|
+| `codex` | `codex` |
+| `claude` | `claude` |
+| `grok` | `grok-cli` (native CLI) or `grok-cursor` (via Cursor intermediary) |
+| `cursor` | `cursor` |
+| `composer` | `composer` |
+
 Binary presence proves only that a route is a candidate. Use an available
 non-egressing authentication or capability probe when the harness exposes one,
 and do not call a route usable until it returns a valid artifact. Classify a
@@ -205,23 +216,64 @@ root, and pre-create the round output directory as private scratch outside the
 repository. For named peers, start one job per exact target; for a selected panel,
 start one job per selected peer. Start all jobs before waiting.
 
+**At the defaults, the peer budget needs nothing from you.** This skill's worker
+self-bounds at 600s and the runner supervisor derives a floor of 1230s, so the
+runner window already sits outside the worker's cap and reaps nothing healthy.
+
+**Raising `CROSS_MODEL_HARD_SECS` widens the runner window automatically.** The
+runner derives its supervisor hard cap from the ambient knob
+(`max(1230, knob + 30)`). Do not set a numeric `CE_PEER_HARD_SECS` here — and
+clear any ambient one on the start prefix (`CE_PEER_HARD_SECS=`) so a stale
+export cannot undercut the derivation. Do not re-export a *resolved*
+`CROSS_MODEL_HARD_SECS` onto the worker's command line: that converts a
+fallback into an override and strips the worker of its route-aware default
+(idle-guarded streaming routes share `HARD_SECS`; `grok-cli` alone keeps the
+lower `UNGUARDED_HARD_SECS` bound because its `--json-schema` path cannot stream).
+
 Each worker writes `<run-dir>/pov-<target>.json`, where `<target>` is the resolved
 route target with `grok-cli`/`grok-cursor` collapsing to `grok`. Pass exactly that
 path as `--result-path` to `peer-job-runner.py start`, so `done` is keyed to the
 artifact and `result <job-id>` reads it without guessing the filename or the
 host's provider key.
 
+**Interpreter.** The commands below run a bundled Python script. Resolve the
+interpreter in the *same* shell call as the command -- each tool call is a fresh
+shell, so a `$PY` set in an earlier call does not persist. Do not hardcode
+`python3`: on native Windows it resolves to a Microsoft Store stub that exits
+without running Python, and that stub still satisfies `command -v`, so probe
+execution rather than presence.
+
+```bash
+PY="$(for c in python3 python py; do command -v "$c" >/dev/null 2>&1 && "$c" -c '' >/dev/null 2>&1 && { echo "$c"; break; }; done)"; [ -n "$PY" ] || { echo "no working Python 3 interpreter on PATH" >&2; exit 1; };
+```
+
 Record every job id and the epoch after the final start. Poll all jobs in
-bounded slices with
-`python3 "$SKILL_DIR/scripts/peer-job-runner.py" wait --max-secs 30 --json <job-ids...>`.
+bounded slices (resolve `$PY` again in each tool call — shells do not persist):
+
+```bash
+SKILL_DIR="<absolute path of the directory containing the SKILL.md you just read>";
+PY="$(for c in python3 python py; do command -v "$c" >/dev/null 2>&1 && "$c" -c '' >/dev/null 2>&1 && { echo "$c"; break; }; done)"; [ -n "$PY" ] || { echo "no working Python 3 interpreter on PATH" >&2; exit 1; };
+"$PY" "$SKILL_DIR/scripts/peer-job-runner.py" wait --max-secs 30 --json <job-ids...>
+```
+
 Job ids or job-directory paths are positional. `--skill`, `--run-id`, and
 `--label` are start-only; never pass them to `wait`. Do not add a separate shell
 sleep: `wait` itself provides the bounded polling delay. Use one aggregate
-deadline of 610 seconds after the final start; never begin a wait that can cross
-it. At the deadline, reap each nonterminal job in a short call, then make one
-final
-`python3 "$SKILL_DIR/scripts/peer-job-runner.py" wait --max-secs 10 --json <job-ids...>`
-call. Classify every started job from its terminal state; `done` alone does not
+deadline of `CROSS_MODEL_HARD_SECS` + 10 seconds (610s by default, since this
+skill's workers self-bound at 600s); never begin a wait that can cross it. Read
+the knob rather than hardcoding the result -- a hardcoded deadline silently reaps
+a healthy peer whenever a user raises the knob, wasting the peer's full spend.
+Repeat the bounded slices above until every job is terminal or that deadline is
+spent; a single slice shorter than the deadline is not a substitute. At the
+deadline, reap each nonterminal job in a short call, then make one final wait:
+
+```bash
+SKILL_DIR="<absolute path of the directory containing the SKILL.md you just read>";
+PY="$(for c in python3 python py; do command -v "$c" >/dev/null 2>&1 && "$c" -c '' >/dev/null 2>&1 && { echo "$c"; break; }; done)"; [ -n "$PY" ] || { echo "no working Python 3 interpreter on PATH" >&2; exit 1; };
+"$PY" "$SKILL_DIR/scripts/peer-job-runner.py" wait --max-secs 10 --json <job-ids...>
+```
+
+Classify every started job from its terminal state; `done` alone does not
 prove a usable artifact exists.
 
 Read artifacts and logs only through the runner's ownership-checked `result`

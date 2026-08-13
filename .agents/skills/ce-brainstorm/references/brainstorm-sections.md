@@ -22,10 +22,10 @@ Sections earn their place by serving one of these audiences. Omit padding.
 
 ## Unified plan skeleton contract
 
-New `ce-brainstorm` outputs live under `docs/plans/` and use the unified plan
+New `ce-brainstorm` outputs live under `<root>/plans/` and use the unified plan
 artifact contract:
 
-- **Path:** `docs/plans/YYYY-MM-DD-NNN-<type>-<topic>-plan.<md|html>`.
+- **Path:** `<root>/plans/YYYY-MM-DD-HHMM-<type>-<topic>-plan.<md|html>` (local wall-clock write time; no daily sequence number). Reserve the path atomically; on collision, retry with the smallest available numeric suffix before the extension rather than overwriting.
 - **`artifact_contract: ce-unified-plan/v1`**.
 - **`artifact_readiness: requirements-only`**.
 - **`product_contract_source: ce-brainstorm`**.
@@ -63,7 +63,7 @@ Skip document creation when **both** hold:
 - The user only needs brief alignment — no exploration produced novel scope,
   framing, or decisions worth preserving in IDed shape.
 - Any durable decisions made during the dialogue can flow naturally to
-  downstream artifacts (`ce-plan`, the commit message, `docs/solutions/`)
+  downstream artifacts (`ce-plan`, the commit message, `<root>/solutions/`)
   without a brainstorm doc as an intermediary.
 
 The trigger for creating a doc is when the dialogue surfaced enough
@@ -75,7 +75,7 @@ durable, IDed form — not just as conversational artifacts.
 this with a null check or with upstream validation?" and the agent confirms
 "upstream validation, here's why" doesn't need a brainstorm doc. The
 decision flows to `ce-plan` (or directly to commit message, or to
-`docs/solutions/` if it's a pattern worth carrying) without a brainstorm
+`<root>/solutions/` if it's a pattern worth carrying) without a brainstorm
 artifact in the middle.
 
 Conversely, a brainstorm about a multi-actor feature with contested scope
@@ -128,6 +128,22 @@ standing, and don't keep superseded prose as strikethrough. Version control
 holds the history. Stacked question/resolution strata double the reading surface
 and hide which text is live.
 
+**One owner per rule; cite, don't restate.** A normative rule — a gate, cap,
+threshold, or output contract — is stated in full at exactly one owning
+entry: the R-ID that carries it. Every other section that needs the rule
+cites the owning ID (`Covers R4`, `Governs R5, R7`, "per R6") and adds only
+what is local to that section. Linked projections are sanctioned — an AE
+restating behavior under a `Covers R…` marker, a Flow citing the Rs it
+sequences. **Unlinked sibling restatement** — the same rule written out again
+in a Key Decision, Flow, or Scope bullet with no ID link — is the defect:
+each copy drifts independently and the doc has no rule for which one wins.
+
+**Bind external authorities; don't summarize them.** When a requirement or
+decision adopts an external document (a field guide, spec, standard), state
+the commitment, cite the path, and record only this work's deltas. A
+multi-sentence summary of the cited document is restatement of an owner that
+lives outside the doc.
+
 ## Ready for Planning Check
 
 Run this against the written artifact before declaring it written or presenting
@@ -143,7 +159,8 @@ the Phase 4 handoff:
    Scope Boundaries, and the `work-relationships` section do not contradict one
    another. Could a reader find a contradiction in each section in one pass? A
    sentence with more than one parenthetical or a requirement that specifies two
-   outcomes fails this check — split it or defer the fork.
+   outcomes, or a rule stated in full in more than one section, fails this check
+   — split it, defer the fork, or replace the duplicate with its owning ID.
 3. **Focused** — the Product Contract owns one coherent work unit. Surrounding
    work appears only as context, deferred work, or an explicit non-goal; it does
    not leak into active Requirements, Flows, or Acceptance Examples.
@@ -191,17 +208,26 @@ worse than omitting it.
 
 - **Key Decisions** — include when the brainstorm produced opinionated
   framing choices (defaults, scope narrowings, foundational technical picks)
-  that constrain Requirements / Flows / Scope below. Each entry names the
-  decision in bold with prose rationale. Sits high in the rendered doc so
-  readers encounter the framing choices before descending into detail.
+  that constrain Requirements / Flows / Scope below. Sits high in the
+  rendered doc so readers encounter the framing choices before descending
+  into detail. Each entry is a **provenance index entry, not a second
+  statement of the rule**: the decision in bold, at most one line of
+  rationale, and — when the decision constrains specific requirements —
+  exact `Governs R5, R7` links naming them. The full normative rule text
+  lives on the governed Rs; an entry that would write the rule out again
+  cites them instead. A pure framing decision with no governed R carries
+  its rationale and no links.
   An entry recording a decision settled in the invoking conversation may
   carry the inline annotation
   `(session-settled: <class> — chosen over <alternative>: <reason>)`, with
   exactly two classes — `user-directed` (the user chose against or between
   surfaced options) and `user-approved` (the agent proposed with the
   tradeoff surfaced; the user assented). An agent never labels its own
-  unexamined proposal. `ce-plan` enrichment inherits these labels into
-  plan KTDs.
+  unexamined proposal. Preserve the label on the Product Contract Key
+  Decision and its exact `Governs R…` links. `ce-plan` may inherit the label
+  into a KTD only when the KTD makes a distinct how-level choice and cites
+  the governed R-IDs; it must not create a KTD that merely mirrors the
+  product decision.
 
 - **How This Work Fits Together** — required when the coherent-work gate split
   a broader request; otherwise include when this plan is one part of a larger
@@ -340,7 +366,9 @@ artifact.
 - **`type`** — conventional-commit-prefix-aligned classification (`feat`,
   `fix`, `refactor`, `docs`, etc.).
 - **`date`** — creation date in ISO 8601 (`YYYY-MM-DD`), ASCII digits only.
-  Used in the filename (`docs/plans/YYYY-MM-DD-NNN-<type>-<topic>-plan.<md|html>`).
+  Matches the calendar date in the filename
+  (`<root>/plans/YYYY-MM-DD-HHMM-<type>-<topic>-plan.<md|html>`), which adds the
+  local wall-clock time at write.
 - **`topic`** — kebab-case slug identifying the brainstorm subject (e.g.,
   `surface-scope-earlier`, `demo-reel-local-save`). Used in the filename and
   as the resume-detection key when `ce-brainstorm` scans for an existing

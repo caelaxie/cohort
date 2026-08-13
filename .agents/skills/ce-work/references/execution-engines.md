@@ -46,7 +46,7 @@ When the target resolves to the current host's default execution route and no di
 
 ### Per-checkout configuration
 
-Standing configuration uses one mode plus an ordered route list:
+Standing configuration uses one mode plus an ordered route list. Resolve `work_engine_mode` and `work_engine_preferences` independently from the two repo files (`config.local.yaml` then `config.yaml`); a present local list, including `[]`, replaces the team list. Do not pick one file for the whole group.
 
 ```yaml
 work_engine_mode: prefer
@@ -127,7 +127,7 @@ Copyable goal-mode prompt (standalone — emit verbatim, substituting only the l
 ```text
 /goal Implement <plan-path> to its Definition of Done.
 
-The plan is the authority — don't read it whole. Scan headings, read the Goal Capsule, then work the units in dependency order, reading each unit plus its cited R/F/AE/KTD as you go. Run the plan's Verification Contract gates and satisfy each unit's test scenarios. Track progress outside the plan file, not in it.
+The plan is the authority — don't read it whole. Scan headings, read the Goal Capsule, then work the units in dependency order, reading each unit plus its cited R/F/AE/KTD and any Product Contract Key Decision whose exact `Governs R…` links name that unit's cited R-IDs as you go. Run the plan's Verification Contract gates and satisfy each unit's test scenarios. Track progress outside the plan file, not in it.
 
 This top-level goal owns the implementation tail: run simplification and code review when the diff meets the repo's normal criteria, apply eligible fixes, and surface residual findings. Follow the plan's PR/landing strategy if it defines one; the repo's conventions and the user's preferences override it. Surface a genuine blocker — something that changes scope or contradicts the plan — instead of guessing; use your judgment on details the plan leaves open.
 
