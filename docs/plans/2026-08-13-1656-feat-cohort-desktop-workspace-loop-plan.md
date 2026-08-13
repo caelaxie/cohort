@@ -35,7 +35,7 @@ The repo is a product brief with no app. The owner has no existing folder habit 
 
 ### Key Decisions
 
-- **First workspace loop, not a captain slice.** Prove create, reopen, add files, and a live box before embedding Deep Agents. (session-settled: user-approved — chosen over empty shell, captain loop, or sandbox-only: prove create/reopen before agents) Governs R1, R4, R11, R15.
+- **First workspace loop, not a captain slice.** Prove create, reopen, add files, and a live box before embedding the agent runtime (now Prime Agent). (session-settled: user-approved — chosen over empty shell, captain loop, or sandbox-only: prove create/reopen before agents) Governs R1, R4, R11, R15.
 - **Files only.** Chat storage and any chat UI wait for the captain. (session-settled: user-directed — chosen over keep empty chat with the workspace: chat waits for the captain) Governs R11.
 - **Add files from the app.** The loop is not a file manager and not folder-only. (session-settled: user-directed — chosen over see a file list or no file UI: drop or import into the current workspace) Governs R11, R12, R13.
 - **Sidebar roster with switch and create.** Several workspaces can exist; only one is current. (session-settled: user-approved — chosen over list-only or implicit current: click to switch, create from the sidebar) Governs R3, R4, R7, R8.
@@ -219,7 +219,7 @@ stateDiagram-v2
 **Deferred for later**
 
 - Captain conversation, chat history, and any chat UI
-- Specialists, custom tools, and Deep Agents runtime
+- Specialists, custom tools, and Prime Agent runtime
 - In-app file browser, file editor, and rename after create
 - Delete workspace
 - Repair the roster from disk
@@ -259,7 +259,7 @@ None.
 
 ### Sources / Research
 
-- `AGENTS.md` — owner-only v1, Deep Agents later, sandbox assumed, do not invent a mission.
+- `AGENTS.md` — owner-only v1, Prime Agent later, sandbox assumed, do not invent a mission.
 - `ROADMAP.md` — create and reopen a local workspace is the first unchecked v1 item; talk to the captain is later.
 - [July 2026 — Base UI as the Default](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) — new shadcn projects use Base UI primitives; Radix remains supported.
 - [electron-vite guide](https://electron-vite.org/guide) — main, preload, renderer split.
@@ -375,7 +375,7 @@ U1 shell, then U2 store, then U3 roster UI, then U4 add files, then U5 box. U5 s
 - **Failure propagation:** SQLite failure blocks the app. Box failure does not. Folder ensure failure keeps the committed current, sets folder status `error`, and surfaces a short error. Add files then refuse that batch if the pinned directory is missing or not writable.
 - **Native ABI:** `better-sqlite3` and Boxlite share one Electron rebuild. Sqlite load failure is fatal. Boxlite load failure follows KTD6.
 - **Quit and orphan boxes:** App quit stops the box. Next launch reaps leftovers before restore.
-- **Later agents:** Host folder remains the workspace tree they will see. This slice does not start Deep Agents.
+- **Later agents:** Host folder remains the workspace tree they will see. This slice does not start Prime Agent.
 
 ### Risks
 
