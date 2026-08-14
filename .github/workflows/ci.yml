@@ -50,6 +50,13 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      # Windows runners ship VS 18, which node-gyp can't detect, so
+      # better-sqlite3 source builds fail. electron-vite build doesn't run
+      # native modules, so skip install scripts on Windows.
       - run: pnpm install --frozen-lockfile
+        if: runner.os != 'Windows'
+
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+        if: runner.os == 'Windows'
 
       - run: pnpm build
