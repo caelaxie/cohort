@@ -1,12 +1,17 @@
 import { mkdirSync } from 'node:fs'
 import Database from 'better-sqlite3'
+import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { stateDbPath } from './paths'
+import { schema } from './schema'
 
-export function openRosterDb(home: string): Database.Database {
+export type RosterDb = BetterSQLite3Database<typeof schema> & { $client: Database.Database }
+
+export function openRosterDb(home: string): RosterDb {
   mkdirSync(home, { recursive: true })
-  const db = new Database(stateDbPath(home))
-  db.pragma('foreign_keys = ON')
-  db.exec(`
+  const client = new Database(stateDbPath(home))
+  client.pragma('foreign_keys = ON')
+  const db = drizzle({ client, schema })
+  db.$client.exec(`
     CREATE TABLE IF NOT EXISTS workspaces (
       uuid TEXT PRIMARY KEY,
       name TEXT NOT NULL,

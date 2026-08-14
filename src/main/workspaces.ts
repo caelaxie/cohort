@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, mkdirSync, readdirSync } from 'node:fs'
-import type Database from 'better-sqlite3'
-import { openRosterDb } from './db'
+import { asc, eq, sql } from 'drizzle-orm'
+import { openRosterDb, type RosterDb } from './db'
+import { meta, workspaces } from './schema'
 import { assertSafeUuid, newWorkspaceId, workspaceDir, workspacesRoot } from './paths'
 
 export type Workspace = {
@@ -18,21 +19,23 @@ export type CreateResult = {
 }
 
 export class WorkspaceStore {
-  private readonly db: Database.Database
+  private readonly db: RosterDb
 
   constructor(private readonly home: string) {
     this.db = openRosterDb(home)
   }
 
   close(): void {
-    this.db.close()
+    this.db.$client.close()
   }
 
   list(): Workspace[] {
     const current = this.currentUuid()
     const rows = this.db
-      .prepare('SELECT uuid, name FROM workspaces ORDER BY created_at ASC, uuid ASC')
-      .all() as { uuid: string; name: string }[]
+      .select({ uuid: workspaces.uuid, name: workspaces.name })
+      .from(workspaces)
+      .orderBy(asc(workspaces.createdAt), asc(workspaces.uuid))
+      .all()
     return rows.map((row) => ({
       uuid: row.uuid,
       name: row.name,
@@ -41,9 +44,11 @@ export class WorkspaceStore {
   }
 
   currentUuid(): string | null {
-    const row = this.db.prepare("SELECT value FROM meta WHERE key = 'current_uuid'").get() as
-      | { value: string | null }
-      | undefined
+    const row = this.db
+      .select({ value: meta.value })
+      .from(meta)
+      .where(eq(meta.key, 'current_uuid'))
+      .get()
     return row?.value ?? null
   }
 
@@ -53,17 +58,13 @@ export class WorkspaceStore {
     const dir = workspaceDir(this.home, uuid)
     this.preflightCreatePath(dir)
 
-    const insert = this.db.transaction(() => {
-      this.db
-        .prepare('INSERT INTO workspaces (uuid, name, created_at) VALUES (?, ?, ?)')
-        .run(uuid, name, Date.now())
-      this.db
-        .prepare(
-          "INSERT INTO meta (key, value) VALUES ('current_uuid', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-        )
-        .run(uuid)
+    this.db.transaction((tx) => {
+      tx.insert(workspaces).values({ uuid, name, createdAt: Date.now() }).run()
+      tx.insert(meta)
+        .values({ key: 'current_uuid', value: uuid })
+        .onConflictDoUpdate({ target: meta.key, set: { value: sql`excluded.value` } })
+        .run()
     })
-    insert()
 
     const folder = this.ensureFolder(uuid)
     return {
@@ -75,17 +76,19 @@ export class WorkspaceStore {
 
   setCurrent(uuid: string): { workspace: Workspace; folderStatus: FolderStatus; folderError?: string } {
     const id = assertSafeUuid(uuid)
-    const row = this.db.prepare('SELECT uuid, name FROM workspaces WHERE uuid = ?').get(id) as
-      | { uuid: string; name: string }
-      | undefined
+    const row = this.db
+      .select({ uuid: workspaces.uuid, name: workspaces.name })
+      .from(workspaces)
+      .where(eq(workspaces.uuid, id))
+      .get()
     if (!row) {
       throw new Error('unknown workspace')
     }
     this.db
-      .prepare(
-        "INSERT INTO meta (key, value) VALUES ('current_uuid', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-      )
-      .run(id)
+      .insert(meta)
+      .values({ key: 'current_uuid', value: id })
+      .onConflictDoUpdate({ target: meta.key, set: { value: sql`excluded.value` } })
+      .run()
     const folder = this.ensureFolder(id)
     return {
       workspace: { uuid: row.uuid, name: row.name, current: true },
