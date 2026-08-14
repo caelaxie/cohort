@@ -28,11 +28,7 @@ function uniquePath(dir: string, name: string): string {
   return candidate
 }
 
-export function copyFilesIntoWorkspace(
-  home: string,
-  uuid: string,
-  sources: string[]
-): CopyReport {
+export function copyFilesIntoWorkspace(home: string, uuid: string, sources: string[]): CopyReport {
   const dir = workspaceDir(home, uuid)
   if (!existsSync(dir) || !lstatSync(dir).isDirectory() || lstatSync(dir).isSymbolicLink()) {
     return { copied: 0, total: sources.length, error: 'workspace folder is not writable' }

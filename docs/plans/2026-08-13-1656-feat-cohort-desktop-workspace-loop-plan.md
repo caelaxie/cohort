@@ -48,6 +48,7 @@ The repo is a product brief with no app. The owner has no existing folder habit 
 - **Desktop shell is Electron.** Opening directive for this bootstrap. Unlabeled: not examined against another desktop shell.
 
 <!-- ce-section: work-relationships -->
+
 ### How This Work Fits Together
 
 This plan owns the first workspace loop on the desktop. The broader breakdown below is the current understanding, not a committed roadmap.
@@ -523,12 +524,12 @@ U1 shell, then U2 store, then U3 roster UI, then U4 add files, then U5 box. U5 s
 
 ## Verification Contract
 
-| Gate | Command | When | Proves |
-|---|---|---|---|
-| Typecheck | `pnpm run typecheck` | After each unit | TS project compiles |
-| Unit tests | `pnpm test` | After U2–U5 | Roster, paths, copy, box port |
-| Dev smoke | `pnpm run dev` | After U1, then after U3 and U5 | Window, create/switch, add, box or error |
-| AE walkthrough | Manual against AE1–AE12 | Before done | Product contract |
+| Gate           | Command                 | When                           | Proves                                   |
+| -------------- | ----------------------- | ------------------------------ | ---------------------------------------- |
+| Typecheck      | `pnpm run typecheck`    | After each unit                | TS project compiles                      |
+| Unit tests     | `pnpm test`             | After U2–U5                    | Roster, paths, copy, box port            |
+| Dev smoke      | `pnpm run dev`          | After U1, then after U3 and U5 | Window, create/switch, add, box or error |
+| AE walkthrough | Manual against AE1–AE12 | Before done                    | Product contract                         |
 
 There is no existing CI. Do not invent a release pipeline in this plan.
 

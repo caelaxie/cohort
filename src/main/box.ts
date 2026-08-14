@@ -12,10 +12,7 @@ export type RunningBox = {
   stop: () => Promise<void>
 }
 
-export type BoxStarter = (input: {
-  hostPath: string
-  guestPath: string
-}) => Promise<RunningBox>
+export type BoxStarter = (input: { hostPath: string; guestPath: string }) => Promise<RunningBox>
 
 export class BoxManager {
   private queue: Promise<void> = Promise.resolve()
@@ -31,19 +28,19 @@ export class BoxManager {
 
   setCurrent(uuid: string | null): void {
     const gen = ++this.generation
-    this.state = uuid
-      ? { status: 'starting', uuid }
-      : { status: 'none', uuid: null }
+    this.state = uuid ? { status: 'starting', uuid } : { status: 'none', uuid: null }
     this.onChange(this.state)
-    this.queue = this.queue.then(() => this.remount(uuid, gen)).catch((error) => {
-      if (gen !== this.generation) return
-      this.state = {
-        status: uuid ? 'error' : 'none',
-        uuid,
-        error: error instanceof Error ? error.message : 'box remount failed'
-      }
-      this.onChange(this.state)
-    })
+    this.queue = this.queue
+      .then(() => this.remount(uuid, gen))
+      .catch((error) => {
+        if (gen !== this.generation) return
+        this.state = {
+          status: uuid ? 'error' : 'none',
+          uuid,
+          error: error instanceof Error ? error.message : 'box remount failed'
+        }
+        this.onChange(this.state)
+      })
   }
 
   async quit(): Promise<void> {

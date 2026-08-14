@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { BoxManager, type RunningBox } from './box'
 
-function fakeStarter(log: string[]): (input: { hostPath: string; guestPath: string }) => Promise<RunningBox> {
+function fakeStarter(
+  log: string[]
+): (input: { hostPath: string; guestPath: string }) => Promise<RunningBox> {
   return async (input) => {
     log.push(`start:${input.guestPath}:${input.hostPath}`)
     return {
