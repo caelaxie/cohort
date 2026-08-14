@@ -47,6 +47,7 @@ There is no in-app way to inspect the current folder.
 - **Reopen the no-name-list rule.** Keep the short add success. This contract adds the standing name list. Governs R9.
 
 <!-- ce-section: work-relationships -->
+
 ### How This Work Fits Together
 
 This plan owns the look-only file-name inventory on the right. The breakdown below is the current understanding, not a committed roadmap.
