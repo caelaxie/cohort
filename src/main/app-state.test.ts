@@ -34,7 +34,6 @@ describe('buildAppState', () => {
     const state = buildAppState({
       home,
       workspaces: store.list(),
-      currentUuid: created.workspace.uuid,
       boxStatus: 'none'
     })
     expect(state.files).toEqual(['notes.md', 'shot.png'])
@@ -53,7 +52,6 @@ describe('buildAppState', () => {
     const state = buildAppState({
       home,
       workspaces: store.list(),
-      currentUuid: beta.workspace.uuid,
       boxStatus: 'none'
     })
     expect(state.files).toEqual(['other.txt'])
@@ -65,7 +63,6 @@ describe('buildAppState', () => {
     const state = buildAppState({
       home,
       workspaces: [],
-      currentUuid: null,
       boxStatus: 'none'
     })
     expect(state).not.toHaveProperty('files')
@@ -74,11 +71,10 @@ describe('buildAppState', () => {
   it('yields an empty list for a current empty folder', () => {
     const home = tempHome()
     const store = new WorkspaceStore(home)
-    const created = store.create('Alpha')
+    store.create('Alpha')
     const state = buildAppState({
       home,
       workspaces: store.list(),
-      currentUuid: created.workspace.uuid,
       boxStatus: 'none'
     })
     expect(state.files).toEqual([])
@@ -99,7 +95,6 @@ describe('buildAppState', () => {
     const state = buildAppState({
       home,
       workspaces: store.list(),
-      currentUuid: created.workspace.uuid,
       boxStatus: 'none'
     })
     expect(state.files).toEqual(['notes.md'])
@@ -115,7 +110,6 @@ describe('buildAppState', () => {
     const state = buildAppState({
       home,
       workspaces: store.list(),
-      currentUuid: created.workspace.uuid,
       boxStatus: 'none',
       folderError: 'workspace directory is a symlink'
     })

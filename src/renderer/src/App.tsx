@@ -89,9 +89,7 @@ function App(): React.JSX.Element {
           void addFromDrop(files)
         }}
       />
-      {state.workspaces.some((workspace) => workspace.current) ? (
-        <WorkspaceFilesSidebar files={state.files ?? []} />
-      ) : null}
+      {state.files != null ? <WorkspaceFilesSidebar files={state.files} /> : null}
     </div>
   )
 }

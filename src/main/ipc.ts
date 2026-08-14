@@ -32,7 +32,6 @@ export function registerIpc(): { quit: () => Promise<void> } {
     return buildAppState({
       home,
       workspaces,
-      currentUuid: current?.uuid ?? null,
       boxStatus: boxes.state.status,
       boxError: boxes.state.error,
       folderError

@@ -5,11 +5,9 @@ type Props = {
 export function WorkspaceFilesSidebar({ files }: Props): React.JSX.Element {
   return (
     <aside className="flex w-[244px] shrink-0 flex-col border-l border-hairline bg-surface-1">
-      <div className="flex h-14 items-center px-3" />
+      <div className="h-14 shrink-0" />
 
-      <div className="flex items-center px-3 pb-2">
-        <h2 className="text-[13px] font-medium tracking-[0.4px] text-ink-subtle">Files</h2>
-      </div>
+      <h2 className="px-3 pb-2 text-[13px] font-medium tracking-[0.4px] text-ink-subtle">Files</h2>
 
       <ul className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-auto px-2 pb-3">
         {files.map((name) => (

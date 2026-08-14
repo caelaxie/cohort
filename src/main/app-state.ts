@@ -4,7 +4,6 @@ import { listWorkspaceFiles } from './files'
 export function buildAppState(input: {
   home: string
   workspaces: WorkspaceDto[]
-  currentUuid: string | null
   boxStatus: BoxStatusDto
   boxError?: string
   folderError?: string
@@ -15,7 +14,8 @@ export function buildAppState(input: {
     boxError: input.boxError,
     folderError: input.folderError
   }
-  if (!input.currentUuid) {
+  const currentUuid = input.workspaces.find((item) => item.current)?.uuid
+  if (!currentUuid) {
     return state
   }
   if (input.folderError) {
@@ -23,7 +23,7 @@ export function buildAppState(input: {
     return state
   }
   try {
-    state.files = listWorkspaceFiles(input.home, input.currentUuid)
+    state.files = listWorkspaceFiles(input.home, currentUuid)
   } catch {
     state.files = []
   }
