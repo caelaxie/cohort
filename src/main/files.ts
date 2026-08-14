@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, lstatSync } from 'node:fs'
+import { copyFileSync, existsSync, lstatSync, readdirSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import { workspaceDir } from './paths'
 
@@ -59,4 +59,48 @@ export function copyFilesIntoWorkspace(home: string, uuid: string, sources: stri
     return { copied, total: sources.length, error: lastError }
   }
   return { copied, total: sources.length, error: copied === sources.length ? undefined : lastError }
+}
+
+function collectRegularFiles(absDir: string, prefix: string, out: string[]): void {
+  let entries: string[]
+  try {
+    entries = readdirSync(absDir)
+  } catch {
+    return
+  }
+  for (const name of entries) {
+    const abs = join(absDir, name)
+    try {
+      const stat = lstatSync(abs)
+      if (stat.isSymbolicLink()) {
+        continue
+      }
+      const relative = prefix ? `${prefix}/${name}` : name
+      if (stat.isFile()) {
+        out.push(relative)
+        continue
+      }
+      if (stat.isDirectory()) {
+        collectRegularFiles(abs, relative, out)
+      }
+    } catch {
+      continue
+    }
+  }
+}
+
+export function listWorkspaceFiles(home: string, uuid: string): string[] {
+  const dir = workspaceDir(home, uuid)
+  try {
+    const root = lstatSync(dir)
+    if (!root.isDirectory() || root.isSymbolicLink()) {
+      return []
+    }
+    const names: string[] = []
+    collectRegularFiles(dir, '', names)
+    names.sort((a, b) => a.localeCompare(b))
+    return names
+  } catch {
+    return []
+  }
 }
