@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { WorkspaceSidebar } from '@/components/workspace-sidebar'
-import { formatAddNotice, WorkspaceMain } from '@/components/workspace-main'
+import { WorkspaceMain } from '@/components/workspace-main'
+import { formatAddNotice } from '@/lib/notice'
 import type { AppStateDto } from '../../shared/workspace'
 
 const emptyState: AppStateDto = {
@@ -11,13 +12,12 @@ const emptyState: AppStateDto = {
 function App(): React.JSX.Element {
   const [state, setState] = useState<AppStateDto>(emptyState)
   const [notice, setNotice] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(() =>
+    window.cohort ? null : 'The app bridge is missing. Restart Cohort.'
+  )
 
   useEffect(() => {
-    if (!window.cohort) {
-      setError('The app bridge is missing. Restart Cohort.')
-      return
-    }
+    if (!window.cohort) return
     void window.cohort
       .list()
       .then((next) => {

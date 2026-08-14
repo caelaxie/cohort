@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import type { AddFilesResultDto, AppStateDto, BoxStatusDto } from '../../../shared/workspace'
+import type { AppStateDto, BoxStatusDto } from '../../../shared/workspace'
 
 type Props = {
   state: AppStateDto
@@ -120,12 +120,4 @@ export function WorkspaceMain({
       </div>
     </section>
   )
-}
-
-export function formatAddNotice(result: AddFilesResultDto): string {
-  if (result.error && result.copied === 0) return result.error
-  if (result.total === 0) return 'No files added.'
-  if (result.copied === result.total)
-    return `Added ${result.copied} file${result.copied === 1 ? '' : 's'}.`
-  return `Added ${result.copied} of ${result.total} files.`
 }

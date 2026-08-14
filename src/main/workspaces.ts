@@ -74,7 +74,11 @@ export class WorkspaceStore {
     }
   }
 
-  setCurrent(uuid: string): { workspace: Workspace; folderStatus: FolderStatus; folderError?: string } {
+  setCurrent(uuid: string): {
+    workspace: Workspace
+    folderStatus: FolderStatus
+    folderError?: string
+  } {
     const id = assertSafeUuid(uuid)
     const row = this.db
       .select({ uuid: workspaces.uuid, name: workspaces.name })
