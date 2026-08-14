@@ -11,6 +11,7 @@ export type AppStateDto = {
   boxStatus: BoxStatusDto
   boxError?: string
   folderError?: string
+  files?: string[]
 }
 
 export type AddFilesResultDto = {

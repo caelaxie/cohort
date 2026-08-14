@@ -2,6 +2,7 @@ import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { defaultCohortHome } from './paths'
 import { WorkspaceStore } from './workspaces'
 import { copyFilesIntoWorkspace } from './files'
+import { buildAppState } from './app-state'
 import { BoxManager, type BoxState } from './box'
 import { createLiveBoxStarter } from './live-box'
 import type { AddFilesResultDto, AppStateDto } from '../shared/workspace'
@@ -28,12 +29,13 @@ export function registerIpc(): { quit: () => Promise<void> } {
       const folder = store.ensureFolder(current.uuid)
       if (folder.status === 'error') folderError = folder.error
     }
-    return {
+    return buildAppState({
+      home,
       workspaces,
       boxStatus: boxes.state.status,
       boxError: boxes.state.error,
       folderError
-    }
+    })
   }
 
   const current = store.currentUuid()
@@ -71,7 +73,9 @@ export function registerIpc(): { quit: () => Promise<void> } {
       }
       paths = picked.filePaths
     }
-    return copyFilesIntoWorkspace(home, currentUuid, paths)
+    const report = copyFilesIntoWorkspace(home, currentUuid, paths)
+    sendState()
+    return report
   })
 
   return {

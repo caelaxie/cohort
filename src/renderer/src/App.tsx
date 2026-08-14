@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { WorkspaceSidebar } from '@/components/workspace-sidebar'
 import { WorkspaceMain } from '@/components/workspace-main'
+import { WorkspaceFilesSidebar } from '@/components/workspace-files-sidebar'
 import { formatAddNotice } from '@/lib/notice'
 import type { AppStateDto } from '../../shared/workspace'
 
@@ -88,6 +89,7 @@ function App(): React.JSX.Element {
           void addFromDrop(files)
         }}
       />
+      {state.files != null ? <WorkspaceFilesSidebar files={state.files} /> : null}
     </div>
   )
 }
