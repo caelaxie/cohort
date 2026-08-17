@@ -137,7 +137,11 @@ export function registerIpc(): { quit: () => Promise<void> } {
 
   return {
     quit: async () => {
-      await boxes.quit()
+      // Stop every live box and session, surfacing per-box failures (U6).
+      const stopErrors = await boxes.quit()
+      for (const error of stopErrors) {
+        console.error(`cohort: box stop failed during quit: ${error}`)
+      }
       await captains.disposeAll()
       store.close()
     }
