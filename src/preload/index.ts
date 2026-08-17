@@ -7,6 +7,8 @@ const cohort = {
   setCurrent: (uuid: string): Promise<AppStateDto> => ipcRenderer.invoke('cohort:setCurrent', uuid),
   addFiles: (paths?: string[]): Promise<AddFilesResultDto> =>
     ipcRenderer.invoke('cohort:addFiles', paths),
+  send: (uuid: string, text: string): Promise<AppStateDto> =>
+    ipcRenderer.invoke('cohort:send', uuid, text),
   pathsForFiles: (files: File[]): string[] => files.map((file) => webUtils.getPathForFile(file)),
   onState: (listener: (state: AppStateDto) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, state: AppStateDto): void => {

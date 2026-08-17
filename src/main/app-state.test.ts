@@ -118,3 +118,42 @@ describe('buildAppState', () => {
     store.close()
   })
 })
+
+describe('buildAppState thread', () => {
+  it('carries the current workspace thread and only that thread (AE2)', () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const alpha = store.create('Alpha')
+    store.create('Beta')
+    const state = buildAppState({
+      home,
+      workspaces: store.list(),
+      boxStatus: 'none',
+      thread: [
+        { role: 'user', text: 'hello Alpha' },
+        { role: 'assistant', text: 'hi' }
+      ]
+    })
+    expect(state.thread).toEqual([
+      { role: 'user', text: 'hello Alpha' },
+      { role: 'assistant', text: 'hi' }
+    ])
+    expect(state.thread?.every((m) => !m.text.includes('Beta'))).toBe(true)
+    store.close()
+    void alpha
+  })
+
+  it('omits the thread when no workspace is current (AE6)', () => {
+    const home = tempHome()
+    const state = buildAppState({
+      home,
+      workspaces: [],
+      boxStatus: 'none',
+      thread: [
+        { role: 'user', text: 'orphan' },
+        { role: 'assistant', text: 'reply' }
+      ]
+    })
+    expect(state.thread).toBeUndefined()
+  })
+})

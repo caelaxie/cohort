@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from 'node:fs'
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { defaultCohortHome } from './paths'
 import { WorkspaceStore } from './workspaces'
@@ -5,7 +6,8 @@ import { copyFilesIntoWorkspace } from './files'
 import { buildAppState } from './app-state'
 import { BoxManager } from './box'
 import { createLiveBoxStarter } from './live-box'
-import type { AddFilesResultDto, AppStateDto } from '../shared/workspace'
+import { CaptainHost } from './captain'
+import type { AddFilesResultDto, AppStateDto, ThreadMessageDto } from '../shared/workspace'
 
 export function registerIpc(): { quit: () => Promise<void> } {
   const home = process.env.COHORT_HOME ?? defaultCohortHome()
@@ -21,6 +23,39 @@ export function registerIpc(): { quit: () => Promise<void> } {
     sendState()
   })
 
+  const captains = new CaptainHost(home)
+  // Captain turns drive box liveness (KTD4): mid-work keeps the sandbox up.
+  captains.onWorkingChange(() => {
+    for (const item of store.list()) {
+      boxes.setWorking(item.uuid, captains.isWorking(item.uuid))
+    }
+  })
+  // Background file writes must refresh the name list even while away (R10, R12).
+  captains.onFileChange(() => {
+    sendState()
+  })
+
+  const currentThread = (): ThreadMessageDto[] | undefined => {
+    const currentUuid = store.currentUuid()
+    if (!currentUuid) return undefined
+    return captains.thread(currentUuid) ?? undefined
+  }
+
+  const loadPersistedThread = (uuid: string): void => {
+    const file = captains.threadFile(uuid)
+    if (!file) return
+    void captains
+      .loadThread(
+        uuid,
+        () => existsSync(file),
+        () => readFileSync(file, 'utf8')
+      )
+      .then(() => {
+        sendState()
+      })
+      .catch(() => undefined)
+  }
+
   const snapshot = (): AppStateDto => {
     const workspaces = store.list()
     const current = workspaces.find((item) => item.current)
@@ -34,12 +69,14 @@ export function registerIpc(): { quit: () => Promise<void> } {
       workspaces,
       boxStatus: boxes.state.status,
       boxError: boxes.state.error,
+      thread: currentThread(),
       folderError
     })
   }
 
   const current = store.currentUuid()
   boxes.setCurrent(current)
+  if (current) loadPersistedThread(current)
 
   ipcMain.handle('cohort:list', () => snapshot())
   ipcMain.handle('cohort:create', (_event, name: string) => {
@@ -51,6 +88,22 @@ export function registerIpc(): { quit: () => Promise<void> } {
     if (typeof uuid !== 'string') throw new Error('invalid workspace id')
     store.setCurrent(uuid)
     boxes.setCurrent(uuid)
+    loadPersistedThread(uuid)
+    return snapshot()
+  })
+  ipcMain.handle('cohort:send', async (_event, uuid: unknown, text: unknown) => {
+    // Closed bridge (KTD7): the renderer sends a uuid and text only.
+    if (typeof uuid !== 'string' || typeof text !== 'string' || text.length === 0) {
+      throw new Error('invalid captain message')
+    }
+    const currentUuid = store.currentUuid()
+    if (!currentUuid) {
+      throw new Error('no current workspace')
+    }
+    if (uuid !== currentUuid) {
+      throw new Error('captain is not current')
+    }
+    await captains.send(uuid, text)
     return snapshot()
   })
   ipcMain.handle('cohort:addFiles', async (event, sources?: string[]) => {
@@ -81,6 +134,7 @@ export function registerIpc(): { quit: () => Promise<void> } {
   return {
     quit: async () => {
       await boxes.quit()
+      await captains.disposeAll()
       store.close()
     }
   }

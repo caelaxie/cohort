@@ -5,6 +5,7 @@ export interface CohortApi {
   create: (name: string) => Promise<AppStateDto>
   setCurrent: (uuid: string) => Promise<AppStateDto>
   addFiles: (paths?: string[]) => Promise<AddFilesResultDto>
+  send: (uuid: string, text: string) => Promise<AppStateDto>
   pathsForFiles: (files: File[]) => string[]
   onState: (listener: (state: AppStateDto) => void) => () => void
 }

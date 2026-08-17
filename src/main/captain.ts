@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { assertSafeUuid, workspaceDir } from './paths'
 
@@ -123,6 +123,29 @@ export class CaptainHost {
       await entry.session?.prompt(text)
     } finally {
       this.setWorking(uuid, false)
+      this.persistThread(uuid)
+    }
+  }
+
+  /** Where the persisted thread for a uuid lives, or null when not yet created. */
+  threadFile(uuid: string): string | null {
+    const entry = this.entries.get(uuid)
+    void entry
+    try {
+      return join(primeWorkspaceAgentDir(this.home, uuid), 'thread.json')
+    } catch {
+      return null
+    }
+  }
+
+  private persistThread(uuid: string): void {
+    const entry = this.entries.get(uuid)
+    if (!entry?.thread) return
+    try {
+      const file = join(primeWorkspaceAgentDir(this.home, uuid), 'thread.json')
+      writeFileSync(file, JSON.stringify(entry.thread))
+    } catch {
+      // History persistence is best-effort; the live thread still works.
     }
   }
 
@@ -203,7 +226,7 @@ export class CaptainHost {
     const sessionsDir = primeWorkspaceSessionsDir(this.home, uuid)
     mkdirSync(sessionsDir, { recursive: true })
     mkdirSync(agentDir, { recursive: true })
-    writeMarker(agentDir)
+    writeFileSync(join(agentDir, 'marker'), 'cohort')
     const sessionManager = module.SessionManager.continueRecent(cwd, sessionsDir)
     let result: CreateSessionResult
     try {
@@ -281,9 +304,5 @@ export class CaptainHost {
   }
 }
 
-function writeMarker(agentDir: string): void {
-  const { writeFileSync } = require('node:fs') as typeof import('node:fs')
-  writeFileSync(join(agentDir, 'marker'), 'cohort')
-}
 
 export { loadPrimeModule }

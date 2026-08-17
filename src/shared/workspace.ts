@@ -10,8 +10,14 @@ export type AppStateDto = {
   workspaces: WorkspaceDto[]
   boxStatus: BoxStatusDto
   boxError?: string
+  thread?: ThreadMessageDto[]
   folderError?: string
   files?: string[]
+}
+
+export type ThreadMessageDto = {
+  role: 'user' | 'assistant'
+  text: string
 }
 
 export type AddFilesResultDto = {
