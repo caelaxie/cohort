@@ -23,11 +23,13 @@ export function registerIpc(): { quit: () => Promise<void> } {
     sendState()
   })
 
-  const captains = new CaptainHost(home)
   // Captain turns drive box liveness (KTD4): mid-work keeps the sandbox up.
-  captains.onWorkingChange(() => {
-    for (const item of store.list()) {
-      boxes.setWorking(item.uuid, captains.isWorking(item.uuid))
+  const captains = new CaptainHost(home, undefined, {
+    // Captain commands wait for that workspace's sandbox (KTD5, AE10).
+    boxRunner: (uuid) => async (command) => {
+      const box = await boxes.waitForRunning(uuid)
+      if (!box.exec) throw new Error('sandbox commands are unavailable')
+      return box.exec(command)
     }
   })
   // Background file writes must refresh the name list even while away (R10, R12).

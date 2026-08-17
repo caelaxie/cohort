@@ -10,6 +10,12 @@ export type BoxState = {
 
 export type RunningBox = {
   stop: () => Promise<void>
+  /** Best-effort sandbox command execution; absent when unsupported. */
+  exec?: (command: string) => Promise<{
+    exitCode: number
+    stdout: string
+    stderr: string
+  }>
 }
 
 export type BoxStarter = (input: { hostPath: string; guestPath: string }) => Promise<RunningBox>
@@ -81,6 +87,24 @@ export class BoxManager {
 
   async settle(): Promise<void> {
     await Promise.all(Array.from(this.boxes.values(), (managed) => managed.queue))
+  }
+
+  /** Resolves the running box for a uuid, waiting while it starts (AE10). */
+  async waitForRunning(uuid: string, timeoutMs = 120_000): Promise<RunningBox> {
+    const deadline = Date.now() + timeoutMs
+    for (;;) {
+      const managed = this.boxes.get(uuid)
+      if (managed?.box && managed.status === 'running') return managed.box
+      if (managed?.status === 'error') {
+        throw new Error(managed.error ?? `box for ${uuid} failed to start`)
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`box for ${uuid} is not running`)
+      }
+      const { promise: tick, resolve } = Promise.withResolvers<void>()
+      setTimeout(resolve, 100)
+      await tick
+    }
   }
 
   async quit(): Promise<string[]> {

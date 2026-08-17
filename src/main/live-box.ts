@@ -13,6 +13,14 @@ export function createLiveBoxStarter(): BoxStarter {
     return {
       stop: async () => {
         await box.stop()
+      },
+      // Captain commands run inside this box only (KTD5).
+      exec: async (command: string) => {
+        const result = await box.exec('sh', ['-c', command], undefined, {
+          cwd: guestPath,
+          timeoutSecs: 120
+        })
+        return result
       }
     }
   }

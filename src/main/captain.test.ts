@@ -26,8 +26,27 @@ type CapturedBindings = {
   prompts: string[]
 }
 
-function fakeModule(): { module: PrimeModule; captured: CapturedBindings[] } {
+function fakeModule(): {
+  module: PrimeModule
+  captured: CapturedBindings[]
+  bashWirings: Array<{
+    cwd: string
+    exec: (
+      command: string,
+      cwd: string,
+      hooks: { onData: (data: Buffer) => void }
+    ) => Promise<{ exitCode: number | null }>
+  }>
+} {
   const captured: CapturedBindings[] = []
+  const bashWirings: Array<{
+    cwd: string
+    exec: (
+      command: string,
+      cwd: string,
+      hooks: { onData: (data: Buffer) => void }
+    ) => Promise<{ exitCode: number | null }>
+  }> = []
   const module: PrimeModule = {
     createAgentSession: async (options) => {
       const manager = options.sessionManager as { sessionDir?: string }
@@ -37,7 +56,6 @@ function fakeModule(): { module: PrimeModule; captured: CapturedBindings[] } {
         sessionDir: String(manager.sessionDir),
         prompts: []
       })
-      let reply = ''
       const listeners: Array<(event: unknown) => void> = []
       return {
         session: {
@@ -48,30 +66,47 @@ function fakeModule(): { module: PrimeModule; captured: CapturedBindings[] } {
               listener({ type: 'message_end' })
               listener({ type: 'agent_end' })
             }
-            void reply
           },
           subscribe: (listener: (event: unknown) => void) => {
             listeners.push(listener)
             return () => undefined
           },
           dispose: () => undefined
-        },
-        get reply() {
-          return reply
-        },
-        set reply(value: string) {
-          reply = value
         }
       } as unknown as Awaited<ReturnType<PrimeModule['createAgentSession']>>
     },
+    ModelRuntime: {
+      create: async () => ({})
+    },
+    DefaultResourceLoader: class {
+      constructor(_options: unknown) {}
+      async reload(): Promise<void> {}
+    } as unknown as PrimeModule['DefaultResourceLoader'],
     SessionManager: {
       create: (_cwd: string, sessionDir: string) => ({ sessionDir }),
       continueRecent: (_cwd: string, sessionDir: string) => ({ sessionDir }),
       inMemory: () => ({})
+    },
+    getAgentDir: () => '/tmp/fake-owner-agent',
+    createBashToolDefinition: (
+      cwd: string,
+      options: {
+        operations: {
+          exec: (
+            command: string,
+            cwd: string,
+            hooks: { onData: (data: Buffer) => void }
+          ) => Promise<{ exitCode: number | null }>
+        }
+      }
+    ) => {
+      bashWirings.push({ cwd, exec: options.operations.exec })
+      return { name: 'bash' }
     }
   }
-  return { module, captured }
+  return { module, captured, bashWirings }
 }
+
 
 describe('CaptainHost isolation (U3)', () => {
   it('pins cwd, agentDir, and sessionDir to one workspace uuid (AE4)', async () => {
@@ -223,6 +258,29 @@ describe('CaptainHost isolation (U3)', () => {
     })
     await host.send(a.workspace.uuid, 'write a file')
     expect(seen).toEqual([a.workspace.uuid])
+    await host.disposeAll()
+    store.close()
+  })
+
+  it('binds the bash tool to that workspace box runner, not the host (KTD5/AE4)', async () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const a = store.create('A')
+    const { module, bashWirings } = fakeModule()
+    const ranIn: Array<{ uuid: string; command: string }> = []
+    const host = new CaptainHost(home, async () => module, {
+      boxRunner: (uuid) => async (command) => {
+        ranIn.push({ uuid, command })
+        return { exitCode: 0, stdout: `ran ${command} in ${uuid}`, stderr: '' }
+      }
+    })
+    await host.send(a.workspace.uuid, 'list the files')
+    const outcome = await bashWirings[0].exec('ls /workspace', bashWirings[0].cwd, {
+      onData: () => undefined
+    })
+    expect(bashWirings[0].cwd).toContain(a.workspace.uuid)
+    expect(outcome.exitCode).toBe(0)
+    expect(ranIn).toEqual([{ uuid: a.workspace.uuid, command: 'ls /workspace' }])
     await host.disposeAll()
     store.close()
   })

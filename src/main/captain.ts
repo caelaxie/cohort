@@ -29,10 +29,30 @@ export type CreateSessionOptions = {
   cwd: string
   agentDir: string
   sessionManager: object
+  resourceLoader?: object
+  modelRuntime?: object
+  customTools?: object[]
+  excludeTools?: string[]
 }
 
 export type CreateSessionResult = {
   session: PrimeSession
+}
+
+/** Runs one command inside a workspace's sandbox. */
+export type BoxCommandRunner = (command: string) => Promise<{
+  exitCode: number
+  stdout: string
+  stderr: string
+}>
+
+export type HostOptions = {
+  /** Per-uuid sandbox command runner (KTD5). Absent disables commands. */
+  boxRunner?: (uuid: string) => BoxCommandRunner
+}
+
+type ResourceLoaderInstance = {
+  reload: () => Promise<void>
 }
 
 /** Structural view of the loaded SDK module (KTD1: in-process only). */
@@ -43,6 +63,21 @@ export type PrimeModule = {
     continueRecent: (cwd: string, sessionDir: string) => object
     inMemory: () => object
   }
+  getAgentDir: () => string
+  ModelRuntime: { create: (options?: { authPath?: string }) => Promise<object> }
+  DefaultResourceLoader: new (options: Record<string, unknown>) => ResourceLoaderInstance
+  createBashToolDefinition: (
+    cwd: string,
+    options: {
+      operations: {
+        exec: (
+          command: string,
+          cwd: string,
+          hooks: { onData: (data: Buffer) => void }
+        ) => Promise<{ exitCode: number | null }>
+      }
+    }
+  ) => object
 }
 
 type PrimeModuleLoader = () => Promise<PrimeModule>
@@ -67,6 +102,13 @@ function primeWorkspaceSessionsDir(home: string, uuid: string): string {
   return join(primeWorkspaceAgentDir(home, uuid), 'sessions')
 }
 
+const CAPTAIN_SYSTEM_PROMPT = [
+  'You are the captain of this Cohort workspace.',
+  'You see and change files only inside this workspace.',
+  'Commands run inside this workspace sandbox; never touch anything outside it.',
+  'Be concise and direct with the owner.'
+].join(' ')
+
 type HostEntry = {
   session: PrimeSession | null
   create: Promise<void> | null
@@ -89,10 +131,12 @@ export class CaptainHost {
   private threadEmitTimer: ReturnType<typeof setTimeout> | null = null
   private readonly fileListeners: Array<(uuid: string) => void> = []
   private disposed = false
+  private modelRuntimePromise: Promise<object> | null = null
 
   constructor(
     private readonly home: string,
-  private readonly loader: PrimeModuleLoader = loadPrimeModule
+    private readonly loader: PrimeModuleLoader = loadPrimeModule,
+    private readonly options: HostOptions = {}
   ) {}
 
   onWorkingChange(listener: () => void): void {
@@ -238,15 +282,64 @@ export class CaptainHost {
     mkdirSync(agentDir, { recursive: true })
     writeFileSync(join(agentDir, 'marker'), 'cohort')
     const sessionManager = module.SessionManager.continueRecent(cwd, sessionsDir)
+    // Shared owner auth (KTD3); prompts, sessions, and tools stay per-workspace.
+    const modelRuntime = await this.sharedModelRuntime(module)
+    // Resource discovery confined to this workspace (R4): no host skills,
+    // extensions, or ancestor context files leak into the captain.
+    const resourceLoader = new module.DefaultResourceLoader({
+      cwd,
+      agentDir,
+      noExtensions: true,
+      noSkills: true,
+      noThemes: true,
+      noPromptTemplates: true,
+      systemPromptOverride: () => CAPTAIN_SYSTEM_PROMPT,
+      agentsFilesOverride: () => ({ agentsFiles: [] })
+    })
+    await resourceLoader.reload()
+    const customTools: object[] = []
+    if (this.options.boxRunner) {
+      const runInBox = this.options.boxRunner(uuid)
+      customTools.push(
+        module.createBashToolDefinition(cwd, {
+          operations: {
+            exec: async (command, _cwdArg, hooks) => {
+              const result = await runInBox(command)
+              if (result.stdout) hooks.onData(Buffer.from(result.stdout))
+              return { exitCode: result.exitCode }
+            }
+          }
+        })
+      )
+    }
     let result: CreateSessionResult
     try {
-      result = await module.createAgentSession({ cwd, agentDir, sessionManager })
+      result = await module.createAgentSession({
+        cwd,
+        agentDir,
+        sessionManager,
+        resourceLoader,
+        modelRuntime,
+        customTools,
+        // Host bash is never exposed: commands run in the workspace box (KTD5).
+        excludeTools: ['bash']
+      })
     } catch (cause) {
       throw new PrimeSdkError('Prime session could not be created', { cause })
     }
     const entry = this.ensureEntry(uuid)
     entry.session = result.session
     entry.unsubscribe = result.session.subscribe((event) => this.onEvent(uuid, event))
+  }
+
+  private async sharedModelRuntime(module: PrimeModule): Promise<object> {
+    if (!this.modelRuntimePromise) {
+      this.modelRuntimePromise = module.ModelRuntime.create().catch((cause) => {
+        this.modelRuntimePromise = null
+        throw new PrimeSdkError('owner model credentials unavailable', { cause })
+      })
+    }
+    return this.modelRuntimePromise
   }
 
   private onEvent(uuid: string, event: PrimeSessionEvent): void {
