@@ -33,7 +33,10 @@ export type CreateSessionResult = {
 }
 
 /** Runs one command inside a workspace's sandbox. */
-export type BoxCommandRunner = (command: string) => Promise<{
+export type BoxCommandRunner = (
+  command: string,
+  options?: { timeoutMs?: number }
+) => Promise<{
   exitCode: number
   stdout: string
   stderr: string
@@ -70,7 +73,11 @@ export type PrimeModule = {
         exec: (
           command: string,
           cwd: string,
-          hooks: { onData: (data: Buffer) => void }
+          hooks: {
+            onData: (data: Buffer) => void
+            signal?: AbortSignal
+            timeout?: number
+          }
         ) => Promise<{ exitCode: number | null }>
       }
     }
@@ -368,6 +375,8 @@ type HostEntry = {
   working: boolean
   thread: ThreadMessage[] | null
   unsubscribe: (() => void) | null
+  /** Serializes prompts per uuid: two cohort:send calls never interleave. */
+  sendQueue: Promise<void>
 }
 
 /**
@@ -379,7 +388,7 @@ export class CaptainHost {
   private readonly entries = new Map<string, HostEntry>()
   private module: PrimeModule | null = null
   private moduleLoad: Promise<PrimeModule> | null = null
-  private readonly workingListeners: Array<() => void> = []
+  private readonly workingListeners: Array<(uuid: string, working: boolean) => void> = []
   private readonly threadListeners: Array<() => void> = []
   private threadEmitTimer: ReturnType<typeof setTimeout> | null = null
   private readonly fileListeners: Array<(uuid: string) => void> = []
@@ -392,7 +401,7 @@ export class CaptainHost {
     private readonly options: HostOptions = {}
   ) {}
 
-  onWorkingChange(listener: () => void): void {
+  onWorkingChange(listener: (uuid: string, working: boolean) => void): void {
     this.workingListeners.push(listener)
   }
 
@@ -416,18 +425,44 @@ export class CaptainHost {
   async send(uuid: string, text: string): Promise<void> {
     const entry = await this.entryFor(uuid)
     this.assertLive()
-    entry.thread = [
-      ...(entry.thread ?? []),
-      { role: 'user', text },
-      { role: 'assistant', text: '' }
-    ]
-    this.setWorking(uuid, true)
-    try {
-      await entry.session?.prompt(text)
-    } finally {
-      this.setWorking(uuid, false)
+    const turn = async (): Promise<void> => {
+      // Only the user message lands eagerly: each assistant entry is appended
+      // lazily on the first streamed event of its message.
+      entry.thread = [...(entry.thread ?? []), { role: 'user', text }]
+      // The in-flight user message must survive a quit mid-turn.
       this.persistThread(uuid)
+      this.setWorking(uuid, true)
+      try {
+        await entry.session?.prompt(text)
+      } catch (cause) {
+        this.markFailedTurn(entry, cause)
+        throw cause
+      } finally {
+        this.setWorking(uuid, false)
+        this.persistThread(uuid)
+      }
     }
+    // Prompts for one uuid run strictly serially, in send order.
+    const chained = entry.sendQueue.then(turn)
+    entry.sendQueue = chained.catch(() => undefined)
+    await chained
+  }
+
+  /**
+   * Marks a rejected prompt in the thread: an assistant entry that started
+   * but never received text becomes the failure marker; a turn that failed
+   * before any assistant entry started leaves the user message as-is.
+   */
+  private markFailedTurn(entry: HostEntry, cause: unknown): void {
+    const thread = entry.thread ?? []
+    const last = thread[thread.length - 1]
+    if (last?.role === 'assistant' && last.text === '') {
+      thread[thread.length - 1] = {
+        role: 'assistant',
+        text: `(turn failed: ${cause instanceof Error ? cause.message : String(cause)})`
+      }
+    }
+    this.emitThreadSoon()
   }
 
   /** Where the persisted thread for a uuid lives, or null for an unsafe uuid. */
@@ -446,8 +481,11 @@ export class CaptainHost {
     if (!file) return
     try {
       writeFileSync(file, JSON.stringify(entry.thread))
-    } catch {
-      // History persistence is best-effort; the live thread still works.
+    } catch (cause) {
+      // History persistence stays best-effort; the live thread still works.
+      console.error(
+        `cohort: thread persist failed for ${uuid}: ${cause instanceof Error ? cause.message : String(cause)}`
+      )
     }
   }
 
@@ -475,6 +513,11 @@ export class CaptainHost {
       clearTimeout(this.threadEmitTimer)
       this.threadEmitTimer = null
     }
+    // A quit mid-turn must not lose in-flight threads: persist every entry
+    // before disposing sessions and clearing the map.
+    for (const [uuid, entry] of this.entries) {
+      if (entry.thread) this.persistThread(uuid)
+    }
     const entries = Array.from(this.entries.values())
     await Promise.all(
       entries.map(async (entry) => {
@@ -494,7 +537,14 @@ export class CaptainHost {
   private ensureEntry(uuid: string): HostEntry {
     let entry = this.entries.get(uuid)
     if (!entry) {
-      entry = { session: null, create: null, working: false, thread: null, unsubscribe: null }
+      entry = {
+        session: null,
+        create: null,
+        working: false,
+        thread: null,
+        unsubscribe: null,
+        sendQueue: Promise.resolve()
+      }
       this.entries.set(uuid, entry)
     }
     return entry
@@ -564,9 +614,25 @@ export class CaptainHost {
         module.createBashToolDefinition(cwd, {
           operations: {
             exec: async (command, _cwdArg, hooks) => {
-              const result = await runInBox(command)
-              if (result.stdout) hooks.onData(Buffer.from(result.stdout))
-              return { exitCode: result.exitCode }
+              const { onData, signal, timeout } = hooks
+              if (signal?.aborted) throw new Error('bash command aborted')
+              const timeoutMs = typeof timeout === 'number' ? timeout : undefined
+              const running = runInBox(command, timeoutMs === undefined ? undefined : { timeoutMs })
+              let detach: () => void = () => undefined
+              const aborted = new Promise<never>((_, reject) => {
+                if (!signal) return
+                const onAbort = (): void => reject(new Error('bash command aborted'))
+                signal.addEventListener('abort', onAbort, { once: true })
+                detach = () => signal.removeEventListener('abort', onAbort)
+              })
+              try {
+                const result = await Promise.race([running, aborted])
+                if (result.stdout) onData(Buffer.from(result.stdout))
+                if (result.stderr) onData(Buffer.from(result.stderr))
+                return { exitCode: result.exitCode }
+              } finally {
+                detach()
+              }
             }
           }
         })
@@ -609,15 +675,26 @@ export class CaptainHost {
       for (const listener of this.fileListeners) listener(uuid)
       return
     }
-    if (!entry.thread || entry.thread.length === 0) return
-    const last = entry.thread[entry.thread.length - 1]
+    // Each assistant message opens a fresh entry; user messages are appended
+    // by send() and never arrive as streamed events.
+    if (event.type === 'message_start') {
+      entry.thread = [...(entry.thread ?? []), { role: 'assistant', text: '' }]
+      this.emitThreadSoon()
+      return
+    }
     const message = event.assistantMessageEvent
     if (
       event.type === 'message_update' &&
       message?.type === 'text_delta' &&
-      typeof message.delta === 'string' &&
-      last.role === 'assistant'
+      typeof message.delta === 'string'
     ) {
+      const thread = (entry.thread ??= [])
+      let last = thread[thread.length - 1]
+      if (!last || last.role !== 'assistant') {
+        // SDKs that skip message_start still get their reply captured.
+        last = { role: 'assistant', text: '' }
+        thread.push(last)
+      }
       last.text += message.delta
       this.emitThreadSoon()
     }
@@ -652,7 +729,7 @@ export class CaptainHost {
     const entry = this.entries.get(uuid)
     if (!entry || entry.working === working) return
     entry.working = working
-    for (const listener of this.workingListeners) listener()
+    for (const listener of this.workingListeners) listener(uuid, working)
   }
 
   private async loadModule(): Promise<PrimeModule> {

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -51,7 +51,17 @@ type FileToolWiring = {
   }
 }
 
-function fakeModule(): {
+type FakePrompt = (text: string, emit: (event: unknown) => void) => Promise<void>
+
+/** Streams a reply the way the real SDK does: message_start, deltas, end. */
+const defaultPrompt: FakePrompt = async (text, emit) => {
+  emit({ type: 'message_start' })
+  emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: text } })
+  emit({ type: 'message_end' })
+  emit({ type: 'agent_end' })
+}
+
+function fakeModule(options: { prompt?: FakePrompt } = {}): {
   module: PrimeModule
   captured: CapturedBindings[]
   bashWirings: Array<{
@@ -59,18 +69,27 @@ function fakeModule(): {
     exec: (
       command: string,
       cwd: string,
-      hooks: { onData: (data: Buffer) => void }
+      hooks: {
+        onData: (data: Buffer) => void
+        signal?: AbortSignal
+        timeout?: number
+      }
     ) => Promise<{ exitCode: number | null }>
   }>
   fileWirings: FileToolWiring[]
 } {
+  const promptBehavior = options.prompt ?? defaultPrompt
   const captured: CapturedBindings[] = []
   const bashWirings: Array<{
     cwd: string
     exec: (
       command: string,
       cwd: string,
-      hooks: { onData: (data: Buffer) => void }
+      hooks: {
+        onData: (data: Buffer) => void
+        signal?: AbortSignal
+        timeout?: number
+      }
     ) => Promise<{ exitCode: number | null }>
   }> = []
   const fileWirings: FileToolWiring[] = []
@@ -91,14 +110,9 @@ function fakeModule(): {
         session: {
           prompt: async (text: string) => {
             captured[captured.length - 1].prompts.push(text)
-            for (const listener of listeners) {
-              listener({
-                type: 'message_update',
-                assistantMessageEvent: { type: 'text_delta', delta: text }
-              })
-              listener({ type: 'message_end' })
-              listener({ type: 'agent_end' })
-            }
+            await promptBehavior(text, (event) => {
+              for (const listener of listeners) listener(event)
+            })
           },
           subscribe: (listener: (event: unknown) => void) => {
             listeners.push(listener)
@@ -129,7 +143,11 @@ function fakeModule(): {
           exec: (
             command: string,
             cwd: string,
-            hooks: { onData: (data: Buffer) => void }
+            hooks: {
+              onData: (data: Buffer) => void
+              signal?: AbortSignal
+              timeout?: number
+            }
           ) => Promise<{ exitCode: number | null }>
         }
       }
@@ -238,13 +256,13 @@ describe('CaptainHost isolation (U3)', () => {
     const a = store.create('A')
     const { module } = fakeModule()
     const host = new CaptainHost(home, async () => module)
-    const seen: boolean[] = []
-    host.onWorkingChange(() => {
-      seen.push(host.isWorking(a.workspace.uuid))
+    const seen: Array<string> = []
+    host.onWorkingChange((uuid, working) => {
+      seen.push(`${uuid}:${working}`)
     })
     await host.send(a.workspace.uuid, 'hello')
     expect(host.isWorking(a.workspace.uuid)).toBe(false)
-    expect(seen).toContain(true)
+    expect(seen).toEqual([`${a.workspace.uuid}:true`, `${a.workspace.uuid}:false`])
     await host.disposeAll()
     store.close()
   })
@@ -404,6 +422,250 @@ describe('CaptainHost isolation (U3)', () => {
       writeWiring.operations.writeFile?.(join(workspaceRoot, 'notes.txt'), 'hello')
     ).resolves.toBeUndefined()
     expect(existsSync(join(workspaceRoot, 'notes.txt'))).toBe(true)
+    await host.disposeAll()
+    store.close()
+  })
+
+  it('appends only the user message up front and builds the assistant entry from stream events (#11)', async () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const a = store.create('A')
+    const { module } = fakeModule()
+    const host = new CaptainHost(home, async () => module)
+    await host.send(a.workspace.uuid, 'hi')
+    expect(host.thread(a.workspace.uuid)).toEqual([
+      { role: 'user', text: 'hi' },
+      { role: 'assistant', text: 'hi' }
+    ])
+    await host.disposeAll()
+    store.close()
+  })
+
+  it('captures a reply even when the SDK skips message_start (#16)', async () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const a = store.create('A')
+    const { module } = fakeModule({
+      prompt: async (_text, emit) => {
+        emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'streamed' } })
+        emit({ type: 'agent_end' })
+      }
+    })
+    const host = new CaptainHost(home, async () => module)
+    await host.send(a.workspace.uuid, 'go')
+    expect(host.thread(a.workspace.uuid)).toEqual([
+      { role: 'user', text: 'go' },
+      { role: 'assistant', text: 'streamed' }
+    ])
+    await host.disposeAll()
+    store.close()
+  })
+
+  it('records one assistant entry per streamed message in a multi-message turn (#16)', async () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const a = store.create('A')
+    const { module } = fakeModule({
+      prompt: async (_text, emit) => {
+        emit({ type: 'message_start' })
+        emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'part one ' } })
+        emit({ type: 'message_end' })
+        emit({ type: 'message_start' })
+        emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'part two' } })
+        emit({ type: 'message_end' })
+        emit({ type: 'agent_end' })
+      }
+    })
+    const host = new CaptainHost(home, async () => module)
+    await host.send(a.workspace.uuid, 'go')
+    expect(host.thread(a.workspace.uuid)).toEqual([
+      { role: 'user', text: 'go' },
+      { role: 'assistant', text: 'part one ' },
+      { role: 'assistant', text: 'part two' }
+    ])
+    await host.disposeAll()
+    store.close()
+  })
+
+  it('marks a failed turn in the thread and on disk, and keeps bare user turns intact (#11)', async () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const a = store.create('A')
+    const b = store.create('B')
+    const { module } = fakeModule({
+      prompt: async (text, emit) => {
+        if (text === 'started') emit({ type: 'message_start' })
+        throw new Error('boom')
+      }
+    })
+    const host = new CaptainHost(home, async () => module)
+    await expect(host.send(a.workspace.uuid, 'started')).rejects.toThrow('boom')
+    const threadFile = join(home, 'workspaces', a.workspace.uuid, '.prime', 'agent', 'thread.json')
+    expect(host.thread(a.workspace.uuid)).toEqual([
+      { role: 'user', text: 'started' },
+      { role: 'assistant', text: '(turn failed: boom)' }
+    ])
+    expect(JSON.parse(readFileSync(threadFile, 'utf8'))).toEqual([
+      { role: 'user', text: 'started' },
+      { role: 'assistant', text: '(turn failed: boom)' }
+    ])
+    // A turn that fails before any assistant message started keeps the user message.
+    await expect(host.send(b.workspace.uuid, 'never started')).rejects.toThrow('boom')
+    expect(host.thread(b.workspace.uuid)).toEqual([{ role: 'user', text: 'never started' }])
+    await host.disposeAll()
+    store.close()
+  })
+
+  it('serializes overlapping sends for one uuid so prompts never interleave (#9)', async () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const a = store.create('A')
+    const firstStarted = Promise.withResolvers<void>()
+    const secondStarted = Promise.withResolvers<void>()
+    const firstGate = Promise.withResolvers<void>()
+    const secondGate = Promise.withResolvers<void>()
+    const { module, captured } = fakeModule({
+      prompt: async (text) => {
+        if (text === 'one') {
+          firstStarted.resolve()
+          await firstGate.promise
+        } else {
+          secondStarted.resolve()
+          await secondGate.promise
+        }
+      }
+    })
+    const host = new CaptainHost(home, async () => module)
+    const first = host.send(a.workspace.uuid, 'one')
+    const second = host.send(a.workspace.uuid, 'two')
+    await firstStarted.promise
+    // The second prompt stays queued until the first turn settles.
+    expect(captured[0].prompts).toEqual(['one'])
+    firstGate.resolve()
+    await secondStarted.promise
+    expect(captured[0].prompts).toEqual(['one', 'two'])
+    secondGate.resolve()
+    await Promise.all([first, second])
+    await host.disposeAll()
+    store.close()
+  })
+
+  it('persists the user message before the prompt settles (#5)', async () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const a = store.create('A')
+    const promptStarted = Promise.withResolvers<void>()
+    const gate = Promise.withResolvers<void>()
+    const { module } = fakeModule({
+      prompt: async (_text, emit) => {
+        promptStarted.resolve()
+        await gate.promise
+        emit({ type: 'message_start' })
+        emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'done' } })
+        emit({ type: 'agent_end' })
+      }
+    })
+    const host = new CaptainHost(home, async () => module)
+    const pending = host.send(a.workspace.uuid, 'early')
+    const threadFile = join(home, 'workspaces', a.workspace.uuid, '.prime', 'agent', 'thread.json')
+    await promptStarted.promise
+    // Mid-turn: the user message is already durable, with no empty assistant placeholder.
+    expect(JSON.parse(readFileSync(threadFile, 'utf8'))).toEqual([{ role: 'user', text: 'early' }])
+    gate.resolve()
+    await pending
+    expect(host.thread(a.workspace.uuid)).toEqual([
+      { role: 'user', text: 'early' },
+      { role: 'assistant', text: 'done' }
+    ])
+    await host.disposeAll()
+    store.close()
+  })
+
+  it('disposeAll persists in-flight threads before clearing entries (#5)', async () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const a = store.create('A')
+    const promptStarted = Promise.withResolvers<void>()
+    const neverSettles = Promise.withResolvers<void>()
+    const { module } = fakeModule({
+      prompt: async () => {
+        promptStarted.resolve()
+        await neverSettles.promise
+      }
+    })
+    const host = new CaptainHost(home, async () => module)
+    void host.send(a.workspace.uuid, 'mid-turn')
+    const threadFile = join(home, 'workspaces', a.workspace.uuid, '.prime', 'agent', 'thread.json')
+    await promptStarted.promise
+    // Drop the pre-prompt write to prove disposeAll persists the thread itself.
+    rmSync(threadFile)
+    await host.disposeAll()
+    expect(JSON.parse(readFileSync(threadFile, 'utf8'))).toEqual([
+      { role: 'user', text: 'mid-turn' }
+    ])
+    store.close()
+  })
+
+  it('bash wrapper forwards stdout then stderr and passes the SDK timeout through (#19)', async () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const a = store.create('A')
+    const { module, bashWirings } = fakeModule()
+    const runs: Array<{ command: string; timeoutMs?: number }> = []
+    const host = new CaptainHost(home, async () => module, {
+      boxRunner: (uuid) => async (command, options) => {
+        expect(uuid).toBe(a.workspace.uuid)
+        runs.push({ command, timeoutMs: options?.timeoutMs })
+        return { exitCode: 0, stdout: 'out chunk', stderr: 'err chunk' }
+      }
+    })
+    await host.send(a.workspace.uuid, 'list files')
+    const chunks: string[] = []
+    const outcome = await bashWirings[0].exec('ls /workspace', bashWirings[0].cwd, {
+      onData: (data) => chunks.push(data.toString()),
+      timeout: 1500
+    })
+    expect(chunks).toEqual(['out chunk', 'err chunk'])
+    expect(runs).toEqual([{ command: 'ls /workspace', timeoutMs: 1500 }])
+    expect(outcome).toEqual({ exitCode: 0 })
+    await host.disposeAll()
+    store.close()
+  })
+
+  it('bash wrapper rejects when the abort signal is or becomes aborted (#19)', async () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const a = store.create('A')
+    const { module, bashWirings } = fakeModule()
+    const neverSettles = Promise.withResolvers<void>()
+    let started = 0
+    const host = new CaptainHost(home, async () => module, {
+      boxRunner: () => async () => {
+        started += 1
+        await neverSettles.promise
+        return { exitCode: 0, stdout: '', stderr: '' }
+      }
+    })
+    await host.send(a.workspace.uuid, 'x')
+    // Already aborted: the runner is never invoked.
+    const preAborted = new AbortController()
+    preAborted.abort()
+    await expect(
+      bashWirings[0].exec('never', bashWirings[0].cwd, {
+        onData: () => undefined,
+        signal: preAborted.signal
+      })
+    ).rejects.toThrow(/aborted/)
+    expect(started).toBe(0)
+    // Aborting mid-run rejects the wrapper while the box command hangs.
+    const controller = new AbortController()
+    const pending = bashWirings[0].exec('slow', bashWirings[0].cwd, {
+      onData: () => undefined,
+      signal: controller.signal
+    })
+    controller.abort()
+    await expect(pending).rejects.toThrow(/aborted/)
+    expect(started).toBe(1)
     await host.disposeAll()
     store.close()
   })

@@ -8,6 +8,20 @@ import { createLiveBoxStarter } from './live-box'
 import { CaptainHost } from './captain'
 import type { AddFilesResultDto, AppStateDto } from '../shared/workspace'
 
+// cohort:send guards (KTD7): pure so the renderer-facing contract stays
+// testable without electron. Order: shape, then currency.
+export function validateCaptainSend(uuid: unknown, text: unknown, currentUuid: string | null): void {
+  if (typeof uuid !== 'string' || uuid.length === 0 || typeof text !== 'string' || text.length === 0) {
+    throw new Error('invalid captain message')
+  }
+  if (currentUuid === null) {
+    throw new Error('no current workspace')
+  }
+  if (uuid !== currentUuid) {
+    throw new Error('captain is not current')
+  }
+}
+
 export function registerIpc(): { quit: () => Promise<void> } {
   const home = process.env.COHORT_HOME ?? defaultCohortHome()
   const store = new WorkspaceStore(home)
@@ -40,6 +54,12 @@ export function registerIpc(): { quit: () => Promise<void> } {
   })
   // In-flight assistant text streams into the current thread (KTD9).
   captains.onThreadChange(() => {
+    sendState()
+  })
+  // Working transitions keep the sandbox up mid-turn (KTD4): mark the box so
+  // switching away never stops a busy captain.
+  captains.onWorkingChange((uuid, working) => {
+    boxes.setWorking(uuid, working)
     sendState()
   })
 
@@ -103,17 +123,8 @@ export function registerIpc(): { quit: () => Promise<void> } {
   })
   ipcMain.handle('cohort:send', async (_event, uuid: unknown, text: unknown) => {
     // Closed bridge (KTD7): the renderer sends a uuid and text only.
-    if (typeof uuid !== 'string' || typeof text !== 'string' || text.length === 0) {
-      throw new Error('invalid captain message')
-    }
-    const currentUuid = store.currentUuid()
-    if (!currentUuid) {
-      throw new Error('no current workspace')
-    }
-    if (uuid !== currentUuid) {
-      throw new Error('captain is not current')
-    }
-    await captains.send(uuid, text)
+    // validateCaptainSend has established both are non-empty strings.
+    await captains.send(uuid as string, text as string)
     return snapshot()
   })
   ipcMain.handle('cohort:addFiles', async (event, sources?: string[]) => {
