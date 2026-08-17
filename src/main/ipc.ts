@@ -3,7 +3,7 @@ import { defaultCohortHome } from './paths'
 import { WorkspaceStore } from './workspaces'
 import { copyFilesIntoWorkspace } from './files'
 import { buildAppState } from './app-state'
-import { BoxManager, type BoxState } from './box'
+import { BoxManager } from './box'
 import { createLiveBoxStarter } from './live-box'
 import type { AddFilesResultDto, AppStateDto } from '../shared/workspace'
 
@@ -17,7 +17,7 @@ export function registerIpc(): { quit: () => Promise<void> } {
     }
   }
 
-  const boxes = new BoxManager(home, createLiveBoxStarter(), (_state: BoxState) => {
+  const boxes = new BoxManager(home, createLiveBoxStarter(), () => {
     sendState()
   })
 

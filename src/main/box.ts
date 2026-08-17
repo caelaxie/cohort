@@ -14,66 +14,176 @@ export type RunningBox = {
 
 export type BoxStarter = (input: { hostPath: string; guestPath: string }) => Promise<RunningBox>
 
+type ManagedBox = {
+  uuid: string
+  status: BoxStatus
+  error?: string
+  box: RunningBox | null
+  generation: number
+  queue: Promise<void>
+}
+
+function message(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+/**
+ * Multi-live sandbox registry (KTD4): the current workspace always has a box,
+ * and a workspace whose captain is mid-work keeps its box after a switch.
+ * Idle non-current boxes stop; per-uuid operations are serialized.
+ */
 export class BoxManager {
-  private queue: Promise<void> = Promise.resolve()
-  private running: RunningBox | null = null
-  private generation = 0
+  private readonly boxes = new Map<string, ManagedBox>()
+  private currentUuid: string | null = null
+  private readonly working = new Set<string>()
   state: BoxState = { status: 'none', uuid: null }
 
   constructor(
     private readonly home: string,
     private readonly startBox: BoxStarter,
-    private readonly onChange: (state: BoxState) => void
+    private readonly onChange: () => void
   ) {}
 
   setCurrent(uuid: string | null): void {
-    const gen = ++this.generation
-    this.state = uuid ? { status: 'starting', uuid } : { status: 'none', uuid: null }
-    this.onChange(this.state)
-    this.queue = this.queue
-      .then(() => this.remount(uuid, gen))
-      .catch((error) => {
-        if (gen !== this.generation) return
-        this.state = {
-          status: uuid ? 'error' : 'none',
-          uuid,
-          error: error instanceof Error ? error.message : 'box remount failed'
-        }
-        this.onChange(this.state)
+    const previous = this.currentUuid
+    this.currentUuid = uuid
+    if (previous && previous !== uuid && !this.working.has(previous)) {
+      this.stopBox(previous)
+    }
+    if (uuid) {
+      this.ensureBox(uuid)
+      return
+    }
+    this.publish()
+  }
+
+  setWorking(uuid: string, working: boolean): void {
+    if (working) {
+      this.working.add(uuid)
+      this.ensureBox(uuid)
+      return
+    }
+    this.working.delete(uuid)
+    if (uuid !== this.currentUuid) {
+      this.stopBox(uuid)
+      return
+    }
+    this.publish()
+  }
+
+  liveStates(): BoxState[] {
+    return Array.from(this.boxes.values(), (managed) => ({
+      status: managed.status,
+      error: managed.error,
+      uuid: managed.uuid
+    }))
+  }
+
+  async settle(): Promise<void> {
+    await Promise.all(Array.from(this.boxes.values(), (managed) => managed.queue))
+  }
+
+  async quit(): Promise<string[]> {
+    await this.settle()
+    const entries = Array.from(this.boxes.values())
+    for (const managed of entries) {
+      managed.generation += 1
+      managed.status = 'none'
+      managed.error = undefined
+    }
+    const stops = await Promise.allSettled(
+      entries.map(async (managed) => {
+        const box = managed.box
+        managed.box = null
+        if (box) await box.stop()
       })
-  }
-
-  async quit(): Promise<void> {
-    await this.queue
-    this.generation += 1
-    await this.stopRunning()
+    )
+    const errors = stops
+      .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      .map((result) => message(result.reason, 'box stop failed'))
+    this.boxes.clear()
+    this.working.clear()
+    this.currentUuid = null
     this.state = { status: 'none', uuid: null }
-    this.onChange(this.state)
+    this.onChange()
+    return errors
   }
 
-  private async remount(uuid: string | null, gen: number): Promise<void> {
-    await this.stopRunning()
-    if (gen !== this.generation) return
+  private ensureBox(uuid: string): void {
+    const existing = this.boxes.get(uuid)
+    if (existing && (existing.status === 'starting' || existing.status === 'running')) return
+    this.beginStart(uuid)
+  }
+
+  private beginStart(uuid: string): void {
+    const managed =
+      this.boxes.get(uuid) ??
+      ({ uuid, status: 'none', box: null, generation: 0, queue: Promise.resolve() } as ManagedBox)
+    const gen = ++managed.generation
+    managed.status = 'starting'
+    managed.error = undefined
+    this.boxes.set(uuid, managed)
+    managed.queue = managed.queue
+      .then(() => this.launch(managed, gen))
+      .catch((error) => {
+        if (this.boxes.get(uuid) !== managed || gen !== managed.generation) return
+        managed.status = 'error'
+        managed.error = message(error, 'box start failed')
+        this.publish()
+      })
+    this.publish()
+  }
+
+  private async launch(managed: ManagedBox, gen: number): Promise<void> {
+    const previous = managed.box
+    managed.box = null
+    if (previous) await previous.stop()
+    if (this.boxes.get(managed.uuid) !== managed || gen !== managed.generation) return
+    const hostPath = workspaceDir(this.home, managed.uuid)
+    const box = await this.startBox({ hostPath, guestPath: '/workspace' })
+    if (this.boxes.get(managed.uuid) !== managed || gen !== managed.generation) {
+      await box.stop()
+      return
+    }
+    managed.box = box
+    managed.status = 'running'
+    this.publish()
+  }
+
+  private stopBox(uuid: string): void {
+    const managed = this.boxes.get(uuid)
+    if (!managed) {
+      this.publish()
+      return
+    }
+    const gen = ++managed.generation
+    managed.status = 'none'
+    managed.error = undefined
+    managed.queue = managed.queue
+      .then(async () => {
+        const box = managed.box
+        managed.box = null
+        if (box) await box.stop()
+      })
+      .catch(() => undefined)
+      .then(() => {
+        if (this.boxes.get(uuid) !== managed || gen !== managed.generation) return
+        this.boxes.delete(uuid)
+        this.publish()
+      })
+    this.publish()
+  }
+
+  private publish(): void {
+    const uuid = this.currentUuid
     if (!uuid) {
       this.state = { status: 'none', uuid: null }
-      this.onChange(this.state)
-      return
+    } else {
+      const managed = this.boxes.get(uuid)
+      this.state = managed
+        ? { status: managed.status, error: managed.error, uuid }
+        : { status: 'none', uuid }
     }
-    const hostPath = workspaceDir(this.home, uuid)
-    this.running = await this.startBox({ hostPath, guestPath: '/workspace' })
-    if (gen !== this.generation) {
-      await this.stopRunning()
-      return
-    }
-    this.state = { status: 'running', uuid }
-    this.onChange(this.state)
-  }
-
-  private async stopRunning(): Promise<void> {
-    const box = this.running
-    this.running = null
-    if (box) {
-      await box.stop()
-    }
+    this.onChange()
   }
 }
