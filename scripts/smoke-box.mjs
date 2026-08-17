@@ -29,7 +29,11 @@ app.whenReady().then(async () => {
       record('box exec exposed', false)
     } else {
       const result = await exec('echo cohort-box-ok')
-      record('KTD5 real box exec', result.exitCode === 0 && result.stdout.includes('cohort-box-ok'), `exit=${result.exitCode} out="${result.stdout.trim()}"`)
+      record(
+        'KTD5 real box exec',
+        result.exitCode === 0 && result.stdout.includes('cohort-box-ok'),
+        `exit=${result.exitCode} out="${result.stdout.trim()}"`
+      )
     }
 
     // AE1: switch away while A is working keeps A's box.
@@ -37,13 +41,21 @@ app.whenReady().then(async () => {
     boxes.setCurrent(b.workspace.uuid)
     await boxes.settle()
     const liveAfterSwitch = boxes.liveStates().map((s) => s.uuid)
-    record('AE1 working box kept', liveAfterSwitch.includes(a.workspace.uuid) && liveAfterSwitch.includes(b.workspace.uuid), liveAfterSwitch.join(','))
+    record(
+      'AE1 working box kept',
+      liveAfterSwitch.includes(a.workspace.uuid) && liveAfterSwitch.includes(b.workspace.uuid),
+      liveAfterSwitch.join(',')
+    )
 
     // AE9: A's work ends while not current -> box drops.
     boxes.setWorking(a.workspace.uuid, false)
     await boxes.settle()
     const liveAfterIdle = boxes.liveStates().map((s) => s.uuid)
-    record('AE9 idle box dropped', !liveAfterIdle.includes(a.workspace.uuid) && liveAfterIdle.includes(b.workspace.uuid), liveAfterIdle.join(','))
+    record(
+      'AE9 idle box dropped',
+      !liveAfterIdle.includes(a.workspace.uuid) && liveAfterIdle.includes(b.workspace.uuid),
+      liveAfterIdle.join(',')
+    )
 
     const errors = await boxes.quit()
     record('quit stops all', errors.length === 0 && boxes.liveStates().length === 0)
@@ -52,6 +64,8 @@ app.whenReady().then(async () => {
     record('crashed', false, error instanceof Error ? error.message : String(error))
   }
   const failed = results.filter((ok) => !ok).length
-  console.log(`BOXSMOKE_RESULT ${failed === 0 ? 'PASS' : 'FAIL'} ${results.length - failed}/${results.length}`)
+  console.log(
+    `BOXSMOKE_RESULT ${failed === 0 ? 'PASS' : 'FAIL'} ${results.length - failed}/${results.length}`
+  )
   app.exit(failed === 0 ? 0 : 1)
 })

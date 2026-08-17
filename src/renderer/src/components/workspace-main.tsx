@@ -2,7 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
-import type { AppStateDto, BoxStatusDto, ThreadMessageDto } from '../../../shared/workspace'
+import type {
+  AppStateDto,
+  BoxStatusDto,
+  ThreadMessageDto,
+  WorkspaceDto
+} from '../../../shared/workspace'
 
 type Props = {
   state: AppStateDto
@@ -13,12 +18,8 @@ type Props = {
   onDropFiles: (files: File[]) => void
 }
 
-function currentName(state: AppStateDto): string | null {
-  return state.workspaces.find((item) => item.current)?.name ?? null
-}
-
-function currentUuid(state: AppStateDto): string | null {
-  return state.workspaces.find((item) => item.current)?.uuid ?? null
+function currentWorkspace(state: AppStateDto): WorkspaceDto | null {
+  return state.workspaces.find((item) => item.current) ?? null
 }
 
 function sandboxLabel(status: BoxStatusDto): string | null {
@@ -62,18 +63,14 @@ export function WorkspaceMain({
   onAddFiles,
   onDropFiles
 }: Props): React.JSX.Element {
-  const name = currentName(state)
-  const uuid = currentUuid(state)
+  const current = currentWorkspace(state)
+  const name = current?.name ?? null
+  const uuid = current?.uuid ?? null
   const canAdd = Boolean(name)
   const [dragging, setDragging] = useState(false)
   const [draft, setDraft] = useState('')
   const badge = sandboxLabel(state.boxStatus)
   const threadRef = useRef<HTMLDivElement | null>(null)
-
-  // Switching workspaces must not leak a draft into the next captain's thread (R7).
-  useEffect(() => {
-    setDraft('')
-  }, [uuid])
 
   useEffect(() => {
     const node = threadRef.current

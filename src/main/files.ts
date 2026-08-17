@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, lstatSync, readdirSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
-import { workspaceDir } from './paths'
+import { PRIME_RESERVED_DIR, workspaceDir } from './paths'
 
 export type CopyReport = {
   copied: number
@@ -61,8 +61,6 @@ export function copyFilesIntoWorkspace(home: string, uuid: string, sources: stri
   return { copied, total: sources.length, error: copied === sources.length ? undefined : lastError }
 }
 
-const RESERVED_ROOT = '.prime'
-
 function collectRegularFiles(absDir: string, prefix: string, out: string[]): void {
   let entries: string[]
   try {
@@ -71,6 +69,10 @@ function collectRegularFiles(absDir: string, prefix: string, out: string[]): voi
     return
   }
   for (const name of entries) {
+    // The reserved captain-history root never appears in the name list (KTD6).
+    if (prefix === '' && name === PRIME_RESERVED_DIR) {
+      continue
+    }
     const abs = join(absDir, name)
     try {
       const stat = lstatSync(abs)
@@ -78,9 +80,6 @@ function collectRegularFiles(absDir: string, prefix: string, out: string[]): voi
         continue
       }
       const relative = prefix ? `${prefix}/${name}` : name
-      if (prefix === '' && name === RESERVED_ROOT) {
-        continue
-      }
       if (stat.isFile()) {
         out.push(relative)
         continue

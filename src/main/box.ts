@@ -101,6 +101,11 @@ export class BoxManager {
       if (Date.now() >= deadline) {
         throw new Error(`box for ${uuid} is not running`)
       }
+      if (managed) {
+        // The per-uuid queue settles exactly when the pending start settles.
+        await managed.queue.catch(() => undefined)
+        continue
+      }
       const { promise: tick, resolve } = Promise.withResolvers<void>()
       setTimeout(resolve, 100)
       await tick
@@ -176,10 +181,7 @@ export class BoxManager {
 
   private stopBox(uuid: string): void {
     const managed = this.boxes.get(uuid)
-    if (!managed) {
-      this.publish()
-      return
-    }
+    if (!managed) return
     const gen = ++managed.generation
     managed.status = 'none'
     managed.error = undefined

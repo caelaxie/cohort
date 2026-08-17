@@ -95,6 +95,7 @@ function App(): React.JSX.Element {
         }}
       />
       <WorkspaceMain
+        key={state.workspaces.find((item) => item.current)?.uuid ?? 'empty'}
         state={state}
         notice={notice}
         sending={sending}

@@ -3,7 +3,7 @@
 // AE4 isolation on disk, AE7 history, AE8 name-list exclusion.
 // Run: COHORT_HOME=<tmp> npx electron out/smoke/smoke.js
 import { app } from 'electron'
-import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs'
+import { mkdtempSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -17,10 +17,9 @@ const home = process.env.COHORT_HOME ?? mkdtempSync(join(tmpdir(), 'cohort-smoke
 
 app.whenReady().then(async () => {
   try {
-    const { CaptainHost } = await import('../src/main/captain')
+    const { CaptainHost, primeWorkspaceAgentDir } = await import('../src/main/captain')
     const { WorkspaceStore } = await import('../src/main/workspaces')
     const { listWorkspaceFiles } = await import('../src/main/files')
-    const { primeWorkspaceAgentDir } = await import('../src/main/captain')
 
     const store = new WorkspaceStore(home)
     const a = store.create('Alpha')
@@ -40,7 +39,10 @@ app.whenReady().then(async () => {
         maxTokens: 131072
       }
     })
-    await host.send(a.workspace.uuid, 'Reply with exactly the word READY and nothing else. Do not run any commands.')
+    await host.send(
+      a.workspace.uuid,
+      'Reply with exactly the word READY and nothing else. Do not run any commands.'
+    )
     const aThread = host.thread(a.workspace.uuid)
     const aReply = aThread?.filter((m) => m.role === 'assistant').at(-1)?.text ?? ''
     record('F1 real reply', aReply.trim().length > 0, `reply="${aReply.trim().slice(0, 60)}"`)
@@ -53,21 +55,20 @@ app.whenReady().then(async () => {
     await host.send(b.workspace.uuid, 'Reply with exactly the word BETA and nothing else.')
     const bThread = host.thread(b.workspace.uuid)
     const bText = JSON.stringify(bThread)
-    record('F2 separate threads', !bText.includes('READY'), `bThread length=${bThread?.length ?? 0}`)
+    record(
+      'F2 separate threads',
+      !bText.includes('READY'),
+      `bThread length=${bThread?.length ?? 0}`
+    )
 
     // AE8: reserved history directory hidden from the name list.
     const names = listWorkspaceFiles(home, a.workspace.uuid)
     record('AE8 reserved dir hidden', !names.some((n) => n.startsWith('.prime')), names.join(','))
 
     // F4: quit + reopen restores A's thread from disk.
-    const threadFile = join(aAgent, 'thread.json')
     await host.disposeAll()
     const reopened = new CaptainHost(home)
-    const restored = await reopened.loadThread(
-      a.workspace.uuid,
-      () => existsSync(threadFile),
-      () => readFileSync(threadFile, 'utf8')
-    )
+    const restored = await reopened.loadThread(a.workspace.uuid)
     record(
       'F4 thread restored',
       (restored?.length ?? 0) > 0 && JSON.stringify(restored).includes(aReply.trim().slice(0, 20)),
@@ -79,6 +80,8 @@ app.whenReady().then(async () => {
     record('smoke crashed', false, error instanceof Error ? `${error.message}` : String(error))
   }
   const failed = results.filter((r) => !r.ok)
-  console.log(`SMOKE_RESULT ${failed.length === 0 ? 'PASS' : 'FAIL'} ${results.length - failed.length}/${results.length}`)
+  console.log(
+    `SMOKE_RESULT ${failed.length === 0 ? 'PASS' : 'FAIL'} ${results.length - failed.length}/${results.length}`
+  )
   app.exit(failed.length === 0 ? 0 : 1)
 })

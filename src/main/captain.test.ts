@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -62,7 +62,10 @@ function fakeModule(): {
           prompt: async (text: string) => {
             captured[captured.length - 1].prompts.push(text)
             for (const listener of listeners) {
-              listener({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: text } })
+              listener({
+                type: 'message_update',
+                assistantMessageEvent: { type: 'text_delta', delta: text }
+              })
               listener({ type: 'message_end' })
               listener({ type: 'agent_end' })
             }
@@ -79,15 +82,16 @@ function fakeModule(): {
       create: async () => ({})
     },
     DefaultResourceLoader: class {
-      constructor(_options: unknown) {}
-      async reload(): Promise<void> {}
+      constructor(_options: unknown) {
+        void _options
+      }
+      async reload(): Promise<void> {
+        // Fake loader discovers nothing.
+      }
     } as unknown as PrimeModule['DefaultResourceLoader'],
     SessionManager: {
-      create: (_cwd: string, sessionDir: string) => ({ sessionDir }),
-      continueRecent: (_cwd: string, sessionDir: string) => ({ sessionDir }),
-      inMemory: () => ({})
+      continueRecent: (_cwd: string, sessionDir: string) => ({ sessionDir })
     },
-    getAgentDir: () => '/tmp/fake-owner-agent',
     createBashToolDefinition: (
       cwd: string,
       options: {
@@ -106,7 +110,6 @@ function fakeModule(): {
   }
   return { module, captured, bashWirings }
 }
-
 
 describe('CaptainHost isolation (U3)', () => {
   it('pins cwd, agentDir, and sessionDir to one workspace uuid (AE4)', async () => {
@@ -152,9 +155,9 @@ describe('CaptainHost isolation (U3)', () => {
     const { module, captured } = fakeModule()
     const host = new CaptainHost(home, async () => module)
     await expect(host.send('not-a-uuid', 'hi')).rejects.toThrow(/unknown workspace/)
-    await expect(
-      host.send('99999999-9999-4999-8999-999999999999', 'hi')
-    ).rejects.toThrow(/unknown workspace/)
+    await expect(host.send('99999999-9999-4999-8999-999999999999', 'hi')).rejects.toThrow(
+      /unknown workspace/
+    )
     expect(captured).toHaveLength(0)
     await host.disposeAll()
   })
@@ -195,36 +198,28 @@ describe('CaptainHost isolation (U3)', () => {
   it('loads a saved thread from the reserved history directory on demand (AE7)', async () => {
     const home = tempHome()
     const store = new WorkspaceStore(home)
-    const a = store.create('A')
+    const a = store.create('Alpha')
+    const b = store.create('Beta')
     const { module } = fakeModule()
     const host = new CaptainHost(home, async () => module)
     await host.send(a.workspace.uuid, 'remember this')
     // Simulate a persisted thread on disk after quit.
     const agentDir = join(home, 'workspaces', a.workspace.uuid, '.prime', 'agent')
-    const threadFile = join(agentDir, 'thread.json')
     writeFileSync(
-      threadFile,
+      join(agentDir, 'thread.json'),
       JSON.stringify([
         { role: 'user', text: 'remember this' },
         { role: 'assistant', text: 'saved reply' }
       ])
     )
     const fresh = new CaptainHost(home, async () => module)
-    const thread = await fresh.loadThread(
-      a.workspace.uuid,
-      () => existsSync(threadFile),
-      () => readFileSync(threadFile, 'utf8')
-    )
+    const thread = await fresh.loadThread(a.workspace.uuid)
     expect(thread).toEqual([
       { role: 'user', text: 'remember this' },
       { role: 'assistant', text: 'saved reply' }
     ])
     const empty = new CaptainHost(home, async () => module)
-    const missing = await empty.loadThread(
-      a.workspace.uuid,
-      () => false,
-      () => ''
-    )
+    const missing = await empty.loadThread(b.workspace.uuid)
     expect(missing).toBeNull()
     await host.disposeAll()
     await fresh.disposeAll()
@@ -241,7 +236,7 @@ describe('CaptainHost isolation (U3)', () => {
     const workspaceRoot = join(home, 'workspaces', a.workspace.uuid)
     const agentDir = join(workspaceRoot, '.prime', 'agent')
     expect(existsSync(agentDir)).toBe(true)
-    expect(readFileSync(join(agentDir, 'marker'), 'utf8')).toBe('cohort')
+    expect(existsSync(join(agentDir, 'sessions'))).toBe(true)
     await host.disposeAll()
     store.close()
   })
@@ -285,4 +280,3 @@ describe('CaptainHost isolation (U3)', () => {
     store.close()
   })
 })
-

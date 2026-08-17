@@ -1,6 +1,8 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { assertSafeUuid, workspaceDir } from './paths'
+import { PRIME_RESERVED_DIR, assertSafeUuid, workspaceDir } from './paths'
+import { WorkspaceStore } from './workspaces'
+import type { ThreadMessageDto } from '../shared/workspace'
 
 export type PrimeSessionEvent = {
   type: string
@@ -14,16 +16,7 @@ export type PrimeSession = {
   dispose: () => void
 }
 
-export type PrimeSessionHandle = {
-  session: PrimeSession
-  /** Persisted thread or null until first load. */
-  thread: ThreadMessage[] | null
-}
-
-export type ThreadMessage = {
-  role: 'user' | 'assistant'
-  text: string
-}
+export type ThreadMessage = ThreadMessageDto
 
 export type CreateSessionOptions = {
   cwd: string
@@ -49,6 +42,8 @@ export type BoxCommandRunner = (command: string) => Promise<{
 export type HostOptions = {
   /** Per-uuid sandbox command runner (KTD5). Absent disables commands. */
   boxRunner?: (uuid: string) => BoxCommandRunner
+  /** Roster membership check from the long-lived store; defaults to opening one per call. */
+  isKnownWorkspace?: (uuid: string) => boolean
   /** Optional model pin; defaults to the owner's configured model. */
   model?: object
 }
@@ -61,11 +56,8 @@ type ResourceLoaderInstance = {
 export type PrimeModule = {
   createAgentSession: (options: CreateSessionOptions) => Promise<CreateSessionResult>
   SessionManager: {
-    create: (cwd: string, sessionDir: string) => object
     continueRecent: (cwd: string, sessionDir: string) => object
-    inMemory: () => object
   }
-  getAgentDir: () => string
   ModelRuntime: { create: (options?: { authPath?: string }) => Promise<object> }
   DefaultResourceLoader: new (options: Record<string, unknown>) => ResourceLoaderInstance
   createBashToolDefinition: (
@@ -97,7 +89,7 @@ const loadPrimeModule: PrimeModuleLoader = async () =>
   (await import('@earendil-works/pi-coding-agent')) as unknown as PrimeModule
 
 export function primeWorkspaceAgentDir(home: string, uuid: string): string {
-  return join(workspaceDir(home, uuid), '.prime', 'agent')
+  return join(workspaceDir(home, uuid), PRIME_RESERVED_DIR, 'agent')
 }
 
 function primeWorkspaceSessionsDir(home: string, uuid: string): string {
@@ -179,10 +171,8 @@ export class CaptainHost {
     }
   }
 
-  /** Where the persisted thread for a uuid lives, or null when not yet created. */
+  /** Where the persisted thread for a uuid lives, or null for an unsafe uuid. */
   threadFile(uuid: string): string | null {
-    const entry = this.entries.get(uuid)
-    void entry
     try {
       return join(primeWorkspaceAgentDir(this.home, uuid), 'thread.json')
     } catch {
@@ -193,8 +183,9 @@ export class CaptainHost {
   private persistThread(uuid: string): void {
     const entry = this.entries.get(uuid)
     if (!entry?.thread) return
+    const file = this.threadFile(uuid)
+    if (!file) return
     try {
-      const file = join(primeWorkspaceAgentDir(this.home, uuid), 'thread.json')
       writeFileSync(file, JSON.stringify(entry.thread))
     } catch {
       // History persistence is best-effort; the live thread still works.
@@ -205,16 +196,17 @@ export class CaptainHost {
    * Loads the persisted thread for a uuid without opening a live session.
    * Returns null when no history exists (AE7).
    */
-  async loadThread(
-    uuid: string,
-    exists: () => boolean,
-    read: () => string
-  ): Promise<ThreadMessage[] | null> {
+  async loadThread(uuid: string): Promise<ThreadMessage[] | null> {
     assertSafeUuid(uuid)
     const entry = this.ensureEntry(uuid)
     if (entry.thread) return entry.thread
-    if (!exists()) return null
-    entry.thread = this.parseThread(read())
+    const file = this.threadFile(uuid)
+    if (!file || !existsSync(file)) return null
+    try {
+      entry.thread = this.parseThread(readFileSync(file, 'utf8'))
+    } catch {
+      return null
+    }
     return entry.thread
   }
 
@@ -224,12 +216,15 @@ export class CaptainHost {
       clearTimeout(this.threadEmitTimer)
       this.threadEmitTimer = null
     }
-    for (const entry of this.entries.values()) {
-      entry.unsubscribe?.()
-      if (entry.create) await entry.create.catch(() => undefined)
-      entry.session?.dispose()
-      entry.session = null
-    }
+    const entries = Array.from(this.entries.values())
+    await Promise.all(
+      entries.map(async (entry) => {
+        entry.unsubscribe?.()
+        if (entry.create) await entry.create.catch(() => undefined)
+        entry.session?.dispose()
+        entry.session = null
+      })
+    )
     this.entries.clear()
   }
 
@@ -248,8 +243,7 @@ export class CaptainHost {
 
   private async entryFor(uuid: string): Promise<HostEntry> {
     this.assertLive()
-    const known = await this.assertKnownWorkspace(uuid)
-    if (!known) throw new Error(`unknown workspace: ${uuid}`)
+    if (!this.isKnownWorkspace(uuid)) throw new Error(`unknown workspace: ${uuid}`)
     const entry = this.ensureEntry(uuid)
     if (entry.create) {
       await entry.create
@@ -265,8 +259,8 @@ export class CaptainHost {
     return entry
   }
 
-  private async assertKnownWorkspace(uuid: string): Promise<boolean> {
-    const { WorkspaceStore } = await import('./workspaces')
+  private isKnownWorkspace(uuid: string): boolean {
+    if (this.options.isKnownWorkspace) return this.options.isKnownWorkspace(uuid)
     const store = new WorkspaceStore(this.home)
     try {
       return store.list().some((item) => item.uuid === uuid)
@@ -281,8 +275,6 @@ export class CaptainHost {
     const agentDir = primeWorkspaceAgentDir(this.home, uuid)
     const sessionsDir = primeWorkspaceSessionsDir(this.home, uuid)
     mkdirSync(sessionsDir, { recursive: true })
-    mkdirSync(agentDir, { recursive: true })
-    writeFileSync(join(agentDir, 'marker'), 'cohort')
     const sessionManager = module.SessionManager.continueRecent(cwd, sessionsDir)
     // Shared owner auth (KTD3); prompts, sessions, and tools stay per-workspace.
     const modelRuntime = await this.sharedModelRuntime(module)
@@ -402,8 +394,7 @@ export class CaptainHost {
   private async loadModule(): Promise<PrimeModule> {
     if (this.module) return this.module
     if (!this.moduleLoad) {
-      const loader = this.pickLoader()
-      this.moduleLoad = loader()
+      this.moduleLoad = this.loader()
     }
     try {
       this.module = await this.moduleLoad
@@ -413,11 +404,4 @@ export class CaptainHost {
       throw new PrimeSdkError('Prime SDK failed to load in the main process', { cause })
     }
   }
-
-  private pickLoader(): PrimeModuleLoader {
-    return this.loader
-  }
 }
-
-
-export { loadPrimeModule }

@@ -120,27 +120,26 @@ describe('buildAppState', () => {
 })
 
 describe('buildAppState thread', () => {
-  it('carries the current workspace thread and only that thread (AE2)', () => {
+  it('carries exactly the supplied thread for the current workspace (AE2)', () => {
     const home = tempHome()
     const store = new WorkspaceStore(home)
-    const alpha = store.create('Alpha')
+    store.create('Alpha')
     store.create('Beta')
+    const betaThread = [
+      { role: 'user' as const, text: 'hello Beta' },
+      { role: 'assistant' as const, text: 'hi' }
+    ]
     const state = buildAppState({
       home,
       workspaces: store.list(),
       boxStatus: 'none',
-      thread: [
-        { role: 'user', text: 'hello Alpha' },
-        { role: 'assistant', text: 'hi' }
-      ]
+      thread: betaThread
     })
-    expect(state.thread).toEqual([
-      { role: 'user', text: 'hello Alpha' },
-      { role: 'assistant', text: 'hi' }
-    ])
-    expect(state.thread?.every((m) => !m.text.includes('Beta'))).toBe(true)
+    // The snapshot carries the caller-supplied (current Beta) thread verbatim;
+    // buildAppState has no other thread source to mix in.
+    expect(state.thread).toEqual(betaThread)
+    expect(state.thread?.[0].text).toBe('hello Beta')
     store.close()
-    void alpha
   })
 
   it('omits the thread when no workspace is current (AE6)', () => {

@@ -19,6 +19,8 @@ export function workspacesRoot(home: string): string {
 export function stateDbPath(home: string): string {
   return join(home, 'state.sqlite')
 }
+/** Reserved per-workspace directory holding captain history (KTD6). */
+export const PRIME_RESERVED_DIR = '.prime'
 
 export function assertSafeUuid(uuid: string): string {
   if (!UUID_RE.test(uuid)) {

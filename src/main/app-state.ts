@@ -6,8 +6,11 @@ export function buildAppState(input: {
   workspaces: WorkspaceDto[]
   boxStatus: BoxStatusDto
   thread?: ThreadMessageDto[]
+  /** Precomputed name list; when absent it is listed and reported via onFilesListed. */
+  files?: string[]
   boxError?: string
   folderError?: string
+  onFilesListed?: (files: string[]) => void
 }): AppStateDto {
   const state: AppStateDto = {
     workspaces: input.workspaces,
@@ -26,8 +29,13 @@ export function buildAppState(input: {
     state.files = []
     return state
   }
+  if (input.files) {
+    state.files = input.files
+    return state
+  }
   try {
     state.files = listWorkspaceFiles(input.home, currentUuid)
+    input.onFilesListed?.(state.files)
   } catch {
     state.files = []
   }

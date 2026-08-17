@@ -5,10 +5,10 @@ const HOME = '/tmp/cohort-box'
 const A = '44444444-4444-4444-8444-444444444444'
 const B = '55555555-5555-4555-8555-555555555555'
 
-function fakeStarter(log: string[], failFor = new Set<string>()): (input: {
-  hostPath: string
-  guestPath: string
-}) => Promise<RunningBox> {
+function fakeStarter(
+  log: string[],
+  failFor = new Set<string>()
+): (input: { hostPath: string; guestPath: string }) => Promise<RunningBox> {
   return async (input) => {
     if (failFor.has(input.hostPath)) throw new Error('boom')
     log.push(`start:${input.hostPath}`)
@@ -82,7 +82,9 @@ describe('BoxManager registry', () => {
     await manager.settle()
     expect(manager.state).toMatchObject({ status: 'error', uuid: B })
     expect(manager.state.error).toBe('boom')
-    expect(manager.liveStates().some((box) => box.uuid === A && box.status === 'running')).toBe(true)
+    expect(manager.liveStates().some((box) => box.uuid === A && box.status === 'running')).toBe(
+      true
+    )
     await manager.quit()
   })
 

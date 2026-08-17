@@ -1,4 +1,3 @@
-import { existsSync, readFileSync } from 'node:fs'
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { defaultCohortHome } from './paths'
 import { WorkspaceStore } from './workspaces'
@@ -7,7 +6,7 @@ import { buildAppState } from './app-state'
 import { BoxManager } from './box'
 import { createLiveBoxStarter } from './live-box'
 import { CaptainHost } from './captain'
-import type { AddFilesResultDto, AppStateDto, ThreadMessageDto } from '../shared/workspace'
+import type { AddFilesResultDto, AppStateDto } from '../shared/workspace'
 
 export function registerIpc(): { quit: () => Promise<void> } {
   const home = process.env.COHORT_HOME ?? defaultCohortHome()
@@ -30,10 +29,13 @@ export function registerIpc(): { quit: () => Promise<void> } {
       const box = await boxes.waitForRunning(uuid)
       if (!box.exec) throw new Error('sandbox commands are unavailable')
       return box.exec(command)
-    }
+    },
+    // Roster membership from the long-lived store; the host opens one only when unset.
+    isKnownWorkspace: (uuid) => store.list().some((item) => item.uuid === uuid)
   })
   // Background file writes must refresh the name list even while away (R10, R12).
   captains.onFileChange(() => {
+    invalidateFiles()
     sendState()
   })
   // In-flight assistant text streams into the current thread (KTD9).
@@ -41,21 +43,17 @@ export function registerIpc(): { quit: () => Promise<void> } {
     sendState()
   })
 
-  const currentThread = (): ThreadMessageDto[] | undefined => {
-    const currentUuid = store.currentUuid()
-    if (!currentUuid) return undefined
-    return captains.thread(currentUuid) ?? undefined
+  // Name-list cache: thread-stream ticks must not walk the workspace tree.
+  // Every in-app writer (addFiles, captain writes, create, switch) invalidates.
+  let filesCache: string[] | null = null
+  const invalidateFiles = (): void => {
+    filesCache = null
   }
 
   const loadPersistedThread = (uuid: string): void => {
-    const file = captains.threadFile(uuid)
-    if (!file) return
+    if (!captains.threadFile(uuid)) return
     void captains
-      .loadThread(
-        uuid,
-        () => existsSync(file),
-        () => readFileSync(file, 'utf8')
-      )
+      .loadThread(uuid)
       .then(() => {
         sendState()
       })
@@ -75,8 +73,12 @@ export function registerIpc(): { quit: () => Promise<void> } {
       workspaces,
       boxStatus: boxes.state.status,
       boxError: boxes.state.error,
-      thread: currentThread(),
-      folderError
+      thread: current ? (captains.thread(current.uuid) ?? undefined) : undefined,
+      ...(filesCache !== null ? { files: filesCache } : {}),
+      folderError,
+      onFilesListed: (files) => {
+        filesCache = files
+      }
     })
   }
 
@@ -87,12 +89,14 @@ export function registerIpc(): { quit: () => Promise<void> } {
   ipcMain.handle('cohort:list', () => snapshot())
   ipcMain.handle('cohort:create', (_event, name: string) => {
     const result = store.create(typeof name === 'string' ? name : '')
+    invalidateFiles()
     boxes.setCurrent(result.workspace.uuid)
     return snapshot()
   })
   ipcMain.handle('cohort:setCurrent', (_event, uuid: string) => {
     if (typeof uuid !== 'string') throw new Error('invalid workspace id')
     store.setCurrent(uuid)
+    invalidateFiles()
     boxes.setCurrent(uuid)
     loadPersistedThread(uuid)
     return snapshot()
@@ -133,6 +137,7 @@ export function registerIpc(): { quit: () => Promise<void> } {
       paths = picked.filePaths
     }
     const report = copyFilesIntoWorkspace(home, currentUuid, paths)
+    invalidateFiles()
     sendState()
     return report
   })
