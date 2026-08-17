@@ -24,6 +24,31 @@ type CapturedBindings = {
   agentDir: string
   sessionDir: string
   prompts: string[]
+  customToolNames: string[]
+}
+
+/** One captured wiring of a confined file tool factory (R4/R5). */
+type FileToolWiring = {
+  name: string
+  cwd: string
+  operations: {
+    readFile?: (absolutePath: string) => Promise<Buffer | string> | string
+    writeFile?: (absolutePath: string, content: string) => Promise<void>
+    access?: (absolutePath: string) => Promise<void>
+    detectImageMimeType?: (absolutePath: string) => Promise<string | null | undefined>
+    mkdir?: (dir: string) => Promise<void>
+    isDirectory?: (absolutePath: string) => Promise<boolean> | boolean
+    exists?: (absolutePath: string) => Promise<boolean> | boolean
+    stat?: (
+      absolutePath: string
+    ) => Promise<{ isDirectory: () => boolean }> | { isDirectory: () => boolean }
+    readdir?: (absolutePath: string) => Promise<string[]> | string[]
+    glob?: (
+      pattern: string,
+      searchPath: string,
+      options: { ignore: string[]; limit: number }
+    ) => Promise<string[]> | string[]
+  }
 }
 
 function fakeModule(): {
@@ -37,6 +62,7 @@ function fakeModule(): {
       hooks: { onData: (data: Buffer) => void }
     ) => Promise<{ exitCode: number | null }>
   }>
+  fileWirings: FileToolWiring[]
 } {
   const captured: CapturedBindings[] = []
   const bashWirings: Array<{
@@ -47,6 +73,7 @@ function fakeModule(): {
       hooks: { onData: (data: Buffer) => void }
     ) => Promise<{ exitCode: number | null }>
   }> = []
+  const fileWirings: FileToolWiring[] = []
   const module: PrimeModule = {
     createAgentSession: async (options) => {
       const manager = options.sessionManager as { sessionDir?: string }
@@ -54,7 +81,10 @@ function fakeModule(): {
         cwd: options.cwd,
         agentDir: options.agentDir,
         sessionDir: String(manager.sessionDir),
-        prompts: []
+        prompts: [],
+        customToolNames: (options.customTools ?? []).map((tool) =>
+          String((tool as { name?: unknown }).name)
+        )
       })
       const listeners: Array<(event: unknown) => void> = []
       return {
@@ -106,9 +136,33 @@ function fakeModule(): {
     ) => {
       bashWirings.push({ cwd, exec: options.operations.exec })
       return { name: 'bash' }
+    },
+    createReadToolDefinition: (cwd, options) => {
+      fileWirings.push({ name: 'read', cwd, operations: options.operations })
+      return { name: 'read' }
+    },
+    createWriteToolDefinition: (cwd, options) => {
+      fileWirings.push({ name: 'write', cwd, operations: options.operations })
+      return { name: 'write' }
+    },
+    createEditToolDefinition: (cwd, options) => {
+      fileWirings.push({ name: 'edit', cwd, operations: options.operations })
+      return { name: 'edit' }
+    },
+    createGrepToolDefinition: (cwd, options) => {
+      fileWirings.push({ name: 'grep', cwd, operations: options.operations })
+      return { name: 'grep' }
+    },
+    createFindToolDefinition: (cwd, options) => {
+      fileWirings.push({ name: 'find', cwd, operations: options.operations })
+      return { name: 'find' }
+    },
+    createLsToolDefinition: (cwd, options) => {
+      fileWirings.push({ name: 'ls', cwd, operations: options.operations })
+      return { name: 'ls' }
     }
   }
-  return { module, captured, bashWirings }
+  return { module, captured, bashWirings, fileWirings }
 }
 
 describe('CaptainHost isolation (U3)', () => {
@@ -261,7 +315,7 @@ describe('CaptainHost isolation (U3)', () => {
     const home = tempHome()
     const store = new WorkspaceStore(home)
     const a = store.create('A')
-    const { module, bashWirings } = fakeModule()
+    const { module, captured, bashWirings } = fakeModule()
     const ranIn: Array<{ uuid: string; command: string }> = []
     const host = new CaptainHost(home, async () => module, {
       boxRunner: (uuid) => async (command) => {
@@ -276,6 +330,80 @@ describe('CaptainHost isolation (U3)', () => {
     expect(bashWirings[0].cwd).toContain(a.workspace.uuid)
     expect(outcome.exitCode).toBe(0)
     expect(ranIn).toEqual([{ uuid: a.workspace.uuid, command: 'ls /workspace' }])
+    // The box bash rides in customTools and shadows the builtin host bash
+    // by name; excludeTools would have dropped it with the builtin (KTD5).
+    expect(captured[0].customToolNames).toEqual([
+      'read',
+      'write',
+      'edit',
+      'grep',
+      'find',
+      'ls',
+      'bash'
+    ])
+    await host.disposeAll()
+    store.close()
+  })
+
+  it('confines the file tools to the workspace even without a box runner (R4)', async () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const a = store.create('A')
+    const { module, captured } = fakeModule()
+    const host = new CaptainHost(home, async () => module)
+    await host.send(a.workspace.uuid, 'hi')
+    expect(captured[0].customToolNames).toEqual(['read', 'write', 'edit', 'grep', 'find', 'ls'])
+    await host.disposeAll()
+    store.close()
+  })
+
+  it('file tool operations reject paths outside the workspace (R4/R5)', async () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const a = store.create('A')
+    const { module, fileWirings } = fakeModule()
+    const host = new CaptainHost(home, async () => module)
+    await host.send(a.workspace.uuid, 'hi')
+    const [readWiring, writeWiring] = fileWirings
+    expect(readWiring.name).toBe('read')
+    expect(writeWiring.name).toBe('write')
+    const outside = join(tmpdir(), 'cohort-captain-outside.txt')
+    await expect(readWiring.operations.readFile?.(outside)).rejects.toThrow(
+      /outside the workspace sandbox/
+    )
+    await expect(writeWiring.operations.writeFile?.(outside, 'x')).rejects.toThrow(
+      /outside the workspace sandbox/
+    )
+    await expect(writeWiring.operations.mkdir?.(outside)).rejects.toThrow(
+      /outside the workspace sandbox/
+    )
+    await host.disposeAll()
+    store.close()
+  })
+
+  it('rejects captain writes into the reserved .prime directory but allows reads (KTD6)', async () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const a = store.create('A')
+    const { module, fileWirings } = fakeModule()
+    const host = new CaptainHost(home, async () => module)
+    await host.send(a.workspace.uuid, 'hi')
+    const [readWiring, writeWiring] = fileWirings
+    const workspaceRoot = join(home, 'workspaces', a.workspace.uuid)
+    const threadFile = join(workspaceRoot, '.prime', 'agent', 'thread.json')
+    writeFileSync(threadFile, '[]')
+    await expect(readWiring.operations.readFile?.(threadFile)).resolves.toBeInstanceOf(Buffer)
+    await expect(writeWiring.operations.writeFile?.(threadFile, 'forged')).rejects.toThrow(
+      /off-limits for writes/
+    )
+    await expect(
+      writeWiring.operations.mkdir?.(join(workspaceRoot, '.prime', 'agent', 'evil'))
+    ).rejects.toThrow(/off-limits for writes/)
+    // Ordinary workspace writes still go through.
+    await expect(
+      writeWiring.operations.writeFile?.(join(workspaceRoot, 'notes.txt'), 'hello')
+    ).resolves.toBeUndefined()
+    expect(existsSync(join(workspaceRoot, 'notes.txt'))).toBe(true)
     await host.disposeAll()
     store.close()
   })

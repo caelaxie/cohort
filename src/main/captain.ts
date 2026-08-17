@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { constants as fsConstants, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { access, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { basename, dirname, extname, join, resolve, sep } from 'node:path'
 import { PRIME_RESERVED_DIR, assertSafeUuid, workspaceDir } from './paths'
 import { WorkspaceStore } from './workspaces'
 import type { ThreadMessageDto } from '../shared/workspace'
@@ -25,7 +26,6 @@ export type CreateSessionOptions = {
   resourceLoader?: object
   modelRuntime?: object
   customTools?: object[]
-  excludeTools?: string[]
 }
 
 export type CreateSessionResult = {
@@ -38,9 +38,12 @@ export type BoxCommandRunner = (command: string) => Promise<{
   stdout: string
   stderr: string
 }>
-
 export type HostOptions = {
-  /** Per-uuid sandbox command runner (KTD5). Absent disables commands. */
+  /**
+   * Per-uuid sandbox command runner (KTD5): its box-routed bash tool
+   * shadows the builtin host bash by name, so commands never run on the
+   * host while a runner is provided.
+   */
   boxRunner?: (uuid: string) => BoxCommandRunner
   /** Roster membership check from the long-lived store; defaults to opening one per call. */
   isKnownWorkspace?: (uuid: string) => boolean
@@ -72,6 +75,69 @@ export type PrimeModule = {
       }
     }
   ) => object
+  createReadToolDefinition: (
+    cwd: string,
+    options: {
+      operations: {
+        readFile: (absolutePath: string) => Promise<Buffer>
+        access: (absolutePath: string) => Promise<void>
+        detectImageMimeType?: (absolutePath: string) => Promise<string | null | undefined>
+      }
+    }
+  ) => object
+  createWriteToolDefinition: (
+    cwd: string,
+    options: {
+      operations: {
+        writeFile: (absolutePath: string, content: string) => Promise<void>
+        mkdir: (dir: string) => Promise<void>
+      }
+    }
+  ) => object
+  createEditToolDefinition: (
+    cwd: string,
+    options: {
+      operations: {
+        readFile: (absolutePath: string) => Promise<Buffer>
+        writeFile: (absolutePath: string, content: string) => Promise<void>
+        access: (absolutePath: string) => Promise<void>
+      }
+    }
+  ) => object
+  createGrepToolDefinition: (
+    cwd: string,
+    options: {
+      operations: {
+        isDirectory: (absolutePath: string) => Promise<boolean> | boolean
+        readFile: (absolutePath: string) => Promise<string> | string
+      }
+    }
+  ) => object
+  createFindToolDefinition: (
+    cwd: string,
+    options: {
+      operations: {
+        exists: (absolutePath: string) => Promise<boolean> | boolean
+        glob: (
+          pattern: string,
+          searchPath: string,
+          options: { ignore: string[]; limit: number }
+        ) => Promise<string[]> | string[]
+      }
+    }
+  ) => object
+  createLsToolDefinition: (
+    cwd: string,
+    options: {
+      operations: {
+        exists: (absolutePath: string) => Promise<boolean> | boolean
+        stat: (
+          absolutePath: string
+        ) => Promise<{ isDirectory: () => boolean }> | { isDirectory: () => boolean }
+        readdir: (absolutePath: string) => Promise<string[]> | string[]
+      }
+    }
+  ) => object
 }
 
 type PrimeModuleLoader = () => Promise<PrimeModule>
@@ -96,10 +162,203 @@ function primeWorkspaceSessionsDir(home: string, uuid: string): string {
   return join(primeWorkspaceAgentDir(home, uuid), 'sessions')
 }
 
+/**
+ * Resolves a path to its real on-disk location, following symlinks where
+ * they exist. A missing tail (a file about to be created) falls back to
+ * the deepest existing ancestor plus the remaining segments, so symlinked
+ * ancestors cannot smuggle writes outside the workspace.
+ */
+function resolveRealPath(absolutePath: string): string {
+  try {
+    return realpathSync(absolutePath)
+  } catch {
+    const parent = dirname(absolutePath)
+    if (parent === absolutePath) return absolutePath
+    return join(resolveRealPath(parent), basename(absolutePath))
+  }
+}
+
+/**
+ * Guards one captain file operation (R4/R5): the SDK default tools run in
+ * this process and pass absolute paths straight to fs, so every operation
+ * is re-resolved and rejected when it lands outside the workspace.
+ * Writes are additionally barred from the reserved `.prime` directory
+ * (KTD6): main's thread persistence and session manager are the only
+ * legitimate writers there. Reads of `.prime` stay allowed.
+ */
+function confinedPath(rawPath: string, realRoot: string, kind: 'read' | 'write'): string {
+  const realPath = resolveRealPath(resolve(rawPath))
+  if (realPath !== realRoot && !realPath.startsWith(realRoot + sep)) {
+    throw new Error(`path is outside the workspace sandbox: ${rawPath}`)
+  }
+  if (kind === 'write') {
+    const reserved = join(realRoot, PRIME_RESERVED_DIR)
+    if (realPath === reserved || realPath.startsWith(reserved + sep)) {
+      throw new Error(`the reserved ${PRIME_RESERVED_DIR} directory is off-limits for writes: ${rawPath}`)
+    }
+  }
+  return realPath
+}
+
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  '.bmp': 'image/bmp',
+  '.gif': 'image/gif',
+  '.jpeg': 'image/jpeg',
+  '.jpg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp'
+}
+
+/** Directories the find tool never walks, mirroring its ignore list. */
+const GLOB_IGNORED_DIRECTORIES: Record<string, true> = { node_modules: true, '.git': true }
+
+/** Translates a shell-style glob into a RegExp over posix-style paths. */
+function globToRegExp(pattern: string): RegExp {
+  let source = ''
+  for (let i = 0; i < pattern.length; i++) {
+    const char = pattern[i]
+    if (char === '*') {
+      if (pattern[i + 1] === '*') {
+        while (pattern[i + 1] === '*') i++
+        if (pattern[i + 1] === '/') {
+          i++
+          source += '(?:.*/)?'
+        } else {
+          source += '.*'
+        }
+      } else {
+        source += '[^/]*'
+      }
+    } else if (char === '?') {
+      source += '[^/]'
+    } else if (char === '[') {
+      const end = pattern.indexOf(']', i + 1)
+      if (end === -1) {
+        source += '\\['
+      } else {
+        const body = pattern.slice(i + 1, end)
+        source += `[${body.startsWith('!') ? `^${body.slice(1)}` : body}]`
+        i = end
+      }
+    } else {
+      source += char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    }
+  }
+  return new RegExp(`^${source}$`)
+}
+
+/**
+ * Glob-matches files under searchRoot in-process, so the find tool cannot
+ * walk outside the workspace: the SDK default delegates to an fd child
+ * process with the raw, unconfined search path. A pattern without a
+ * separator matches basenames (fd's default); one with separators matches
+ * the full relative path with an implicit leading double-star prefix.
+ */
+async function globWithin(
+  searchRoot: string,
+  pattern: string,
+  options: { ignore: string[]; limit: number }
+): Promise<string[]> {
+  const limit = Math.max(1, options.limit)
+  const fullPathPattern = pattern.includes('/')
+  const matcher = globToRegExp(
+    fullPathPattern && !pattern.startsWith('**/') ? `**/${pattern}` : pattern
+  )
+  const results: string[] = []
+  const walk = async (dir: string, relative: string): Promise<void> => {
+    if (results.length >= limit) return
+    let entries
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (results.length >= limit) return
+      if (GLOB_IGNORED_DIRECTORIES[entry.name]) continue
+      const entryRelative = relative ? `${relative}/${entry.name}` : entry.name
+      if (matcher.test(fullPathPattern ? entryRelative : entry.name)) {
+        results.push(join(dir, entry.name))
+      }
+      if (entry.isDirectory()) await walk(join(dir, entry.name), entryRelative)
+    }
+  }
+  await walk(searchRoot, '')
+  return results
+}
+
+/**
+ * Builds read/write/edit/grep/find/ls definitions whose filesystem
+ * operations are confined to one workspace. Passed through customTools,
+ * they shadow the SDK built-ins by name (the registry applies custom
+ * tools after its own definitions), the same mechanism the box bash uses.
+ */
+function confinedFileTools(module: PrimeModule, workspaceRoot: string): object[] {
+  const realRoot = resolveRealPath(workspaceRoot)
+  const guardRead = (rawPath: string): string => confinedPath(rawPath, realRoot, 'read')
+  const guardWrite = (rawPath: string): string => confinedPath(rawPath, realRoot, 'write')
+  const exists = async (rawPath: string): Promise<boolean> => {
+    const guarded = guardRead(rawPath)
+    try {
+      await access(guarded)
+      return true
+    } catch {
+      return false
+    }
+  }
+  return [
+    module.createReadToolDefinition(workspaceRoot, {
+      operations: {
+        readFile: async (filePath) => readFile(guardRead(filePath)),
+        access: async (filePath) => access(guardRead(filePath)),
+        detectImageMimeType: async (filePath) =>
+          IMAGE_MIME_TYPES[extname(guardRead(filePath)).toLowerCase()] ?? null
+      }
+    }),
+    module.createWriteToolDefinition(workspaceRoot, {
+      operations: {
+        writeFile: async (filePath, content) => writeFile(guardWrite(filePath), content, 'utf-8'),
+        mkdir: async (dir) => {
+          await mkdir(guardWrite(dir), { recursive: true })
+        }
+      }
+    }),
+    module.createEditToolDefinition(workspaceRoot, {
+      operations: {
+        readFile: async (filePath) => readFile(guardRead(filePath)),
+        writeFile: async (filePath, content) => writeFile(guardWrite(filePath), content, 'utf-8'),
+        access: async (filePath) =>
+          access(guardRead(filePath), fsConstants.R_OK | fsConstants.W_OK)
+      }
+    }),
+    module.createGrepToolDefinition(workspaceRoot, {
+      operations: {
+        isDirectory: async (searchPath) => (await stat(guardRead(searchPath))).isDirectory(),
+        readFile: async (filePath) => readFile(guardRead(filePath), 'utf-8')
+      }
+    }),
+    module.createFindToolDefinition(workspaceRoot, {
+      operations: {
+        exists,
+        glob: async (pattern, searchPath, options) =>
+          globWithin(guardRead(searchPath), pattern, options)
+      }
+    }),
+    module.createLsToolDefinition(workspaceRoot, {
+      operations: {
+        exists,
+        stat: async (filePath) => stat(guardRead(filePath)),
+        readdir: async (dirPath) => readdir(guardRead(dirPath))
+      }
+    })
+  ]
+}
+
 const CAPTAIN_SYSTEM_PROMPT = [
   'You are the captain of this Cohort workspace.',
   'You see and change files only inside this workspace.',
   'Commands run inside this workspace sandbox; never touch anything outside it.',
+  'The reserved .prime directory is off-limits for writes.',
   'Be concise and direct with the owner.'
 ].join(' ')
 
@@ -291,9 +550,16 @@ export class CaptainHost {
       agentsFilesOverride: () => ({ agentsFiles: [] })
     })
     await resourceLoader.reload()
-    const customTools: object[] = []
+    // File tools are confined to this workspace (R4/R5): the SDK defaults
+    // run in this process against the host filesystem with no cwd checks.
+    // Every custom tool shadows its builtin namesake because the SDK
+    // registry applies custom tools after its own definitions.
+    const customTools: object[] = [...confinedFileTools(module, cwd)]
     if (this.options.boxRunner) {
       const runInBox = this.options.boxRunner(uuid)
+      // The box-routed bash carries the builtin name and shadows the host
+      // bash (KTD5); excludeTools cannot be used to hide the host bash
+      // because it drops custom tools by name too.
       customTools.push(
         module.createBashToolDefinition(cwd, {
           operations: {
@@ -315,9 +581,7 @@ export class CaptainHost {
         sessionManager,
         resourceLoader,
         modelRuntime,
-        customTools,
-        // Host bash is never exposed: commands run in the workspace box (KTD5).
-        excludeTools: ['bash']
+        customTools
       })
     } catch (cause) {
       throw new PrimeSdkError('Prime session could not be created', { cause })

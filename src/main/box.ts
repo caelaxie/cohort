@@ -101,14 +101,17 @@ export class BoxManager {
       if (Date.now() >= deadline) {
         throw new Error(`box for ${uuid} is not running`)
       }
-      if (managed) {
-        // The per-uuid queue settles exactly when the pending start settles.
-        await managed.queue.catch(() => undefined)
+      if (!managed) {
+        // A working captain is entitled to its box: start it instead of polling blindly.
+        this.ensureBox(uuid)
         continue
       }
+      // The per-uuid queue settles exactly when the pending start settles; the
+      // tick keeps the deadline above enforceable when the start hangs.
       const { promise: tick, resolve } = Promise.withResolvers<void>()
-      setTimeout(resolve, 100)
-      await tick
+      const timer = setTimeout(resolve, 1000)
+      await Promise.race([managed.queue.catch(() => undefined), tick])
+      clearTimeout(timer)
     }
   }
 
@@ -191,7 +194,9 @@ export class BoxManager {
         managed.box = null
         if (box) await box.stop()
       })
-      .catch(() => undefined)
+      .catch((error) => {
+        console.error(`cohort: box stop failed for ${uuid}: ${message(error, 'box stop failed')}`)
+      })
       .then(() => {
         if (this.boxes.get(uuid) !== managed || gen !== managed.generation) return
         this.boxes.delete(uuid)

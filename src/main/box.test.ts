@@ -169,3 +169,63 @@ describe('BoxManager registry', () => {
     await manager.quit()
   })
 })
+
+describe('BoxManager.waitForRunning', () => {
+  it('resolves once a deferred start settles', async () => {
+    const log: string[] = []
+    const { promise: gate, resolve: release } = Promise.withResolvers<void>()
+    const starter = async (input: {
+      hostPath: string
+      guestPath: string
+    }): Promise<RunningBox> => {
+      await gate
+      log.push(`start:${input.hostPath}`)
+      return {
+        stop: async () => {
+          log.push(`stop:${input.hostPath}`)
+        }
+      }
+    }
+    const manager = new BoxManager(HOME, starter, () => undefined)
+    manager.setCurrent(A)
+    const waiting = manager.waitForRunning(A)
+    expect(log).toHaveLength(0)
+    release()
+    const box = await waiting
+    expect(log).toContain(`start:${HOME}/workspaces/${A}`)
+    await box.stop()
+    expect(log).toContain(`stop:${HOME}/workspaces/${A}`)
+    await manager.quit()
+  })
+
+  it('rejects with the surfaced box error when the start fails', async () => {
+    const log: string[] = []
+    const failFor = new Set([`${HOME}/workspaces/${A}`])
+    const manager = new BoxManager(HOME, fakeStarter(log, failFor), () => undefined)
+    manager.setCurrent(A)
+    await expect(manager.waitForRunning(A)).rejects.toThrow('boom')
+    await manager.quit()
+  })
+
+  it('rejects when the start never settles before the timeout', async () => {
+    const { promise: gate, resolve: release } = Promise.withResolvers<void>()
+    const starter = async (): Promise<RunningBox> => {
+      await gate
+      return { stop: async () => undefined }
+    }
+    const manager = new BoxManager(HOME, starter, () => undefined)
+    manager.setCurrent(A)
+    await expect(manager.waitForRunning(A, 300)).rejects.toThrow(/is not running/)
+    release()
+    await manager.quit()
+  })
+
+  it('starts the box itself when no registry entry exists', async () => {
+    const log: string[] = []
+    const manager = new BoxManager(HOME, fakeStarter(log), () => undefined)
+    await manager.waitForRunning(B)
+    expect(log).toContain(`start:${HOME}/workspaces/${B}`)
+    expect(manager.liveStates().map((state) => state.uuid)).toEqual([B])
+    await manager.quit()
+  })
+})

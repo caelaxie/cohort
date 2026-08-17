@@ -61,20 +61,22 @@ function App(): React.JSX.Element {
     }
   }
 
-  const [sending, setSending] = useState(false)
+  const [sendingUuid, setSendingUuid] = useState<string | null>(null)
   const send = async (text: string): Promise<void> => {
     const current = state.workspaces.find((item) => item.current)
     if (!current) return
-    setSending(true)
+    setSendingUuid(current.uuid)
     try {
       setState(await window.cohort.send(current.uuid, text))
       setError(null)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not reach the captain')
     } finally {
-      setSending(false)
+      setSendingUuid(null)
     }
   }
+
+  const currentUuid = state.workspaces.find((item) => item.current)?.uuid ?? null
 
   return (
     <div className="flex h-full min-h-0 bg-canvas text-ink">
@@ -95,10 +97,10 @@ function App(): React.JSX.Element {
         }}
       />
       <WorkspaceMain
-        key={state.workspaces.find((item) => item.current)?.uuid ?? 'empty'}
+        key={currentUuid ?? 'empty'}
         state={state}
+        sending={sendingUuid !== null && sendingUuid === currentUuid}
         notice={notice}
-        sending={sending}
         onSend={(text) => {
           void send(text)
         }}
