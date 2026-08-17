@@ -1,4 +1,10 @@
-import { constants as fsConstants, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import {
+  constants as fsConstants,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync
+} from 'node:fs'
 import { access, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join, resolve, sep } from 'node:path'
 import { PRIME_RESERVED_DIR, assertSafeUuid, workspaceDir } from './paths'
@@ -201,7 +207,9 @@ function confinedPath(rawPath: string, realRoot: string, kind: 'read' | 'write')
   if (kind === 'write') {
     const reserved = join(realRoot, PRIME_RESERVED_DIR)
     if (realPath === reserved || realPath.startsWith(reserved + sep)) {
-      throw new Error(`the reserved ${PRIME_RESERVED_DIR} directory is off-limits for writes: ${rawPath}`)
+      throw new Error(
+        `the reserved ${PRIME_RESERVED_DIR} directory is off-limits for writes: ${rawPath}`
+      )
     }
   }
   return realPath
@@ -334,8 +342,7 @@ function confinedFileTools(module: PrimeModule, workspaceRoot: string): object[]
       operations: {
         readFile: async (filePath) => readFile(guardRead(filePath)),
         writeFile: async (filePath, content) => writeFile(guardWrite(filePath), content, 'utf-8'),
-        access: async (filePath) =>
-          access(guardRead(filePath), fsConstants.R_OK | fsConstants.W_OK)
+        access: async (filePath) => access(guardRead(filePath), fsConstants.R_OK | fsConstants.W_OK)
       }
     }),
     module.createGrepToolDefinition(workspaceRoot, {
@@ -374,6 +381,7 @@ type HostEntry = {
   create: Promise<void> | null
   working: boolean
   thread: ThreadMessage[] | null
+  threadError?: string
   unsubscribe: (() => void) | null
   /** Serializes prompts per uuid: two cohort:send calls never interleave. */
   sendQueue: Promise<void>
@@ -491,20 +499,35 @@ export class CaptainHost {
 
   /**
    * Loads the persisted thread for a uuid without opening a live session.
-   * Returns null when no history exists (AE7).
+   * Returns null when no history exists (AE7); a load failure sets
+   * threadError so the renderer can distinguish corruption from absence.
    */
   async loadThread(uuid: string): Promise<ThreadMessage[] | null> {
     assertSafeUuid(uuid)
     const entry = this.ensureEntry(uuid)
     if (entry.thread) return entry.thread
     const file = this.threadFile(uuid)
-    if (!file || !existsSync(file)) return null
+    if (!file) return null
     try {
-      entry.thread = this.parseThread(readFileSync(file, 'utf8'))
-    } catch {
+      const raw = readFileSync(file, 'utf8')
+      JSON.parse(raw)
+      entry.thread = this.parseThread(raw)
+    } catch (cause) {
+      entry.threadError = `captain history could not be read: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`
+      entry.thread = null
       return null
     }
+    if (entry.thread.length === 0) {
+      // The file exists but holds no usable messages.
+      entry.threadError = 'captain history is unreadable'
+    }
     return entry.thread
+  }
+
+  threadError(uuid: string): string | undefined {
+    return this.entries.get(uuid)?.threadError
   }
 
   async disposeAll(): Promise<void> {

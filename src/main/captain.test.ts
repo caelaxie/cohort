@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -298,6 +298,22 @@ describe('CaptainHost isolation (U3)', () => {
     store.close()
   })
 
+  it('distinguishes corrupt history from no history via threadError (#15)', async () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const a = store.create('Alpha')
+    const { module } = fakeModule()
+    const agentDir = join(home, 'workspaces', a.workspace.uuid, '.prime', 'agent')
+    mkdirSync(agentDir, { recursive: true })
+    writeFileSync(join(agentDir, 'thread.json'), '{not json')
+    const host = new CaptainHost(home, async () => module)
+    const thread = await host.loadThread(a.workspace.uuid)
+    expect(thread).toBeNull()
+    expect(host.threadError(a.workspace.uuid)).toMatch(/could not be read/)
+    await host.disposeAll()
+    store.close()
+  })
+
   it('keeps session files inside the workspace .prime directory (KTD6)', async () => {
     const home = tempHome()
     const store = new WorkspaceStore(home)
@@ -447,7 +463,10 @@ describe('CaptainHost isolation (U3)', () => {
     const a = store.create('A')
     const { module } = fakeModule({
       prompt: async (_text, emit) => {
-        emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'streamed' } })
+        emit({
+          type: 'message_update',
+          assistantMessageEvent: { type: 'text_delta', delta: 'streamed' }
+        })
         emit({ type: 'agent_end' })
       }
     })
@@ -468,10 +487,16 @@ describe('CaptainHost isolation (U3)', () => {
     const { module } = fakeModule({
       prompt: async (_text, emit) => {
         emit({ type: 'message_start' })
-        emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'part one ' } })
+        emit({
+          type: 'message_update',
+          assistantMessageEvent: { type: 'text_delta', delta: 'part one ' }
+        })
         emit({ type: 'message_end' })
         emit({ type: 'message_start' })
-        emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'part two' } })
+        emit({
+          type: 'message_update',
+          assistantMessageEvent: { type: 'text_delta', delta: 'part two' }
+        })
         emit({ type: 'message_end' })
         emit({ type: 'agent_end' })
       }
@@ -561,7 +586,10 @@ describe('CaptainHost isolation (U3)', () => {
         promptStarted.resolve()
         await gate.promise
         emit({ type: 'message_start' })
-        emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'done' } })
+        emit({
+          type: 'message_update',
+          assistantMessageEvent: { type: 'text_delta', delta: 'done' }
+        })
         emit({ type: 'agent_end' })
       }
     })

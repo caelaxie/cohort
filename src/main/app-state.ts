@@ -6,6 +6,7 @@ export function buildAppState(input: {
   workspaces: WorkspaceDto[]
   boxStatus: BoxStatusDto
   thread?: ThreadMessageDto[]
+  threadError?: string
   /** Precomputed name list; when absent it is listed and reported via onFilesListed. */
   files?: string[]
   boxError?: string
@@ -24,6 +25,9 @@ export function buildAppState(input: {
   }
   if (input.thread) {
     state.thread = input.thread
+  }
+  if (input.threadError) {
+    state.threadError = input.threadError
   }
   if (input.folderError) {
     state.files = []

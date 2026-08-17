@@ -10,8 +10,17 @@ import type { AddFilesResultDto, AppStateDto } from '../shared/workspace'
 
 // cohort:send guards (KTD7): pure so the renderer-facing contract stays
 // testable without electron. Order: shape, then currency.
-export function validateCaptainSend(uuid: unknown, text: unknown, currentUuid: string | null): void {
-  if (typeof uuid !== 'string' || uuid.length === 0 || typeof text !== 'string' || text.length === 0) {
+export function validateCaptainSend(
+  uuid: unknown,
+  text: unknown,
+  currentUuid: string | null
+): void {
+  if (
+    typeof uuid !== 'string' ||
+    uuid.length === 0 ||
+    typeof text !== 'string' ||
+    text.length === 0
+  ) {
     throw new Error('invalid captain message')
   }
   if (currentUuid === null) {
@@ -94,6 +103,7 @@ export function registerIpc(): { quit: () => Promise<void> } {
       boxStatus: boxes.state.status,
       boxError: boxes.state.error,
       thread: current ? (captains.thread(current.uuid) ?? undefined) : undefined,
+      threadError: current ? captains.threadError(current.uuid) : undefined,
       ...(filesCache !== null ? { files: filesCache } : {}),
       folderError,
       onFilesListed: (files) => {

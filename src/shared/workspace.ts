@@ -11,6 +11,7 @@ export type AppStateDto = {
   boxStatus: BoxStatusDto
   boxError?: string
   thread?: ThreadMessageDto[]
+  threadError?: string
   folderError?: string
   files?: string[]
 }

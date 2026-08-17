@@ -139,6 +139,10 @@ export function WorkspaceMain({
               state.thread.map((message, index) => (
                 <ThreadMessageView key={index} message={message} />
               ))
+            ) : state.threadError ? (
+              <p className="max-w-[65ch] text-sm text-danger" role="alert">
+                {state.threadError}
+              </p>
             ) : (
               <p className="max-w-[65ch] text-sm text-ink-subtle">
                 Talk to this workspace&apos;s captain. It can read and change the files here.

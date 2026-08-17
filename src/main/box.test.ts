@@ -174,10 +174,7 @@ describe('BoxManager.waitForRunning', () => {
   it('resolves once a deferred start settles', async () => {
     const log: string[] = []
     const { promise: gate, resolve: release } = Promise.withResolvers<void>()
-    const starter = async (input: {
-      hostPath: string
-      guestPath: string
-    }): Promise<RunningBox> => {
+    const starter = async (input: { hostPath: string; guestPath: string }): Promise<RunningBox> => {
       await gate
       log.push(`start:${input.hostPath}`)
       return {
