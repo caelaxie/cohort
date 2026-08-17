@@ -85,12 +85,14 @@ export class CaptainHost {
   private module: PrimeModule | null = null
   private moduleLoad: Promise<PrimeModule> | null = null
   private readonly workingListeners: Array<() => void> = []
+  private readonly threadListeners: Array<() => void> = []
+  private threadEmitTimer: ReturnType<typeof setTimeout> | null = null
   private readonly fileListeners: Array<(uuid: string) => void> = []
   private disposed = false
 
   constructor(
     private readonly home: string,
-    private readonly loader: PrimeModuleLoader = loadPrimeModule
+  private readonly loader: PrimeModuleLoader = loadPrimeModule
   ) {}
 
   onWorkingChange(listener: () => void): void {
@@ -99,6 +101,10 @@ export class CaptainHost {
 
   onFileChange(listener: (uuid: string) => void): void {
     this.fileListeners.push(listener)
+  }
+
+  onThreadChange(listener: () => void): void {
+    this.threadListeners.push(listener)
   }
 
   isWorking(uuid: string): boolean {
@@ -168,6 +174,10 @@ export class CaptainHost {
 
   async disposeAll(): Promise<void> {
     this.disposed = true
+    if (this.threadEmitTimer) {
+      clearTimeout(this.threadEmitTimer)
+      this.threadEmitTimer = null
+    }
     for (const entry of this.entries.values()) {
       entry.unsubscribe?.()
       if (entry.create) await entry.create.catch(() => undefined)
@@ -257,7 +267,16 @@ export class CaptainHost {
       last.role === 'assistant'
     ) {
       last.text += message.delta
+      this.emitThreadSoon()
     }
+  }
+
+  private emitThreadSoon(): void {
+    if (this.threadEmitTimer) return
+    this.threadEmitTimer = setTimeout(() => {
+      this.threadEmitTimer = null
+      for (const listener of this.threadListeners) listener()
+    }, 100)
   }
 
   private parseThread(raw: string): ThreadMessage[] {

@@ -61,6 +61,21 @@ function App(): React.JSX.Element {
     }
   }
 
+  const [sending, setSending] = useState(false)
+  const send = async (text: string): Promise<void> => {
+    const current = state.workspaces.find((item) => item.current)
+    if (!current) return
+    setSending(true)
+    try {
+      setState(await window.cohort.send(current.uuid, text))
+      setError(null)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not reach the captain')
+    } finally {
+      setSending(false)
+    }
+  }
+
   return (
     <div className="flex h-full min-h-0 bg-canvas text-ink">
       <WorkspaceSidebar
@@ -82,6 +97,10 @@ function App(): React.JSX.Element {
       <WorkspaceMain
         state={state}
         notice={notice}
+        sending={sending}
+        onSend={(text) => {
+          void send(text)
+        }}
         onAddFiles={() => {
           void addFromPicker()
         }}

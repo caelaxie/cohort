@@ -34,6 +34,10 @@ export function registerIpc(): { quit: () => Promise<void> } {
   captains.onFileChange(() => {
     sendState()
   })
+  // In-flight assistant text streams into the current thread (KTD9).
+  captains.onThreadChange(() => {
+    sendState()
+  })
 
   const currentThread = (): ThreadMessageDto[] | undefined => {
     const currentUuid = store.currentUuid()
