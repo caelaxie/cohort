@@ -49,6 +49,8 @@ export type BoxCommandRunner = (command: string) => Promise<{
 export type HostOptions = {
   /** Per-uuid sandbox command runner (KTD5). Absent disables commands. */
   boxRunner?: (uuid: string) => BoxCommandRunner
+  /** Optional model pin; defaults to the owner's configured model. */
+  model?: object
 }
 
 type ResourceLoaderInstance = {
@@ -315,6 +317,7 @@ export class CaptainHost {
     let result: CreateSessionResult
     try {
       result = await module.createAgentSession({
+        ...(this.options.model ? { model: this.options.model } : {}),
         cwd,
         agentDir,
         sessionManager,
