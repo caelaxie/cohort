@@ -1,4 +1,6 @@
-import type { AgentSession } from '@earendil-works/pi-coding-agent'
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { assertSafeUuid, workspaceDir } from './paths'
 
 export type PrimeSessionEvent = {
   type: string
@@ -7,21 +9,40 @@ export type PrimeSessionEvent = {
 }
 
 export type PrimeSession = {
-  prompt: (text: string) => Promise<void>
+  prompt: (text: string, options?: { streamingBehavior?: 'steer' | 'followUp' }) => Promise<void>
   subscribe: (listener: (event: PrimeSessionEvent) => void) => () => void
   dispose: () => void
 }
 
-export type PrimeSessionFactory = (input: { cwd: string }) => Promise<PrimeSession>
+export type PrimeSessionHandle = {
+  session: PrimeSession
+  /** Persisted thread or null until first load. */
+  thread: ThreadMessage[] | null
+}
 
-// Minimal structural view of the SDK namespace. The real module is only
-// loaded at runtime through the injectable loader below.
-type PrimeModule = {
-  createAgentSession: (options: {
-    cwd: string
-    sessionManager: object
-  }) => Promise<{ session: AgentSession }>
-  SessionManager: { inMemory: () => object }
+export type ThreadMessage = {
+  role: 'user' | 'assistant'
+  text: string
+}
+
+export type CreateSessionOptions = {
+  cwd: string
+  agentDir: string
+  sessionManager: object
+}
+
+export type CreateSessionResult = {
+  session: PrimeSession
+}
+
+/** Structural view of the loaded SDK module (KTD1: in-process only). */
+export type PrimeModule = {
+  createAgentSession: (options: CreateSessionOptions) => Promise<CreateSessionResult>
+  SessionManager: {
+    create: (cwd: string, sessionDir: string) => object
+    continueRecent: (cwd: string, sessionDir: string) => object
+    inMemory: () => object
+  }
 }
 
 type PrimeModuleLoader = () => Promise<PrimeModule>
@@ -38,53 +59,231 @@ export class PrimeSdkError extends Error {
 const loadPrimeModule: PrimeModuleLoader = async () =>
   (await import('@earendil-works/pi-coding-agent')) as unknown as PrimeModule
 
+export function primeWorkspaceAgentDir(home: string, uuid: string): string {
+  return join(workspaceDir(home, uuid), '.prime', 'agent')
+}
+
+function primeWorkspaceSessionsDir(home: string, uuid: string): string {
+  return join(primeWorkspaceAgentDir(home, uuid), 'sessions')
+}
+
+type HostEntry = {
+  session: PrimeSession | null
+  create: Promise<void> | null
+  working: boolean
+  thread: ThreadMessage[] | null
+  unsubscribe: (() => void) | null
+}
+
 /**
- * Builds a Prime session factory with a lazy in-process SDK import.
- * U1 spike shape: one session, in-memory history, no CLI child process.
+ * One Prime session per workspace uuid, pinned to that workspace folder
+ * (KTD2): cwd, agentDir, and session files never leave the workspace's
+ * reserved `.prime` directory. The SDK module is injectable for tests.
  */
-export function createPrimeSessionFactory(load: PrimeModuleLoader = loadPrimeModule): PrimeSessionFactory {
-  return async ({ cwd }) => {
-    let sdk: PrimeModule
+export class CaptainHost {
+  private readonly entries = new Map<string, HostEntry>()
+  private module: PrimeModule | null = null
+  private moduleLoad: Promise<PrimeModule> | null = null
+  private readonly workingListeners: Array<() => void> = []
+  private readonly fileListeners: Array<(uuid: string) => void> = []
+  private disposed = false
+
+  constructor(
+    private readonly home: string,
+    private readonly loader: PrimeModuleLoader = loadPrimeModule
+  ) {}
+
+  onWorkingChange(listener: () => void): void {
+    this.workingListeners.push(listener)
+  }
+
+  onFileChange(listener: (uuid: string) => void): void {
+    this.fileListeners.push(listener)
+  }
+
+  isWorking(uuid: string): boolean {
+    return this.entries.get(uuid)?.working ?? false
+  }
+
+  thread(uuid: string): ThreadMessage[] | null {
+    return this.entries.get(uuid)?.thread ?? null
+  }
+
+  /** Sends a message to that workspace's captain, opening its session on demand. */
+  async send(uuid: string, text: string): Promise<void> {
+    const entry = await this.entryFor(uuid)
+    this.assertLive()
+    entry.thread = [
+      ...(entry.thread ?? []),
+      { role: 'user', text },
+      { role: 'assistant', text: '' }
+    ]
+    this.setWorking(uuid, true)
     try {
-      sdk = await load()
-    } catch (cause) {
-      throw new PrimeSdkError('Prime SDK failed to load in the main process', { cause })
+      await entry.session?.prompt(text)
+    } finally {
+      this.setWorking(uuid, false)
     }
+  }
+
+  /**
+   * Loads the persisted thread for a uuid without opening a live session.
+   * Returns null when no history exists (AE7).
+   */
+  async loadThread(
+    uuid: string,
+    exists: () => boolean,
+    read: () => string
+  ): Promise<ThreadMessage[] | null> {
+    assertSafeUuid(uuid)
+    const entry = this.ensureEntry(uuid)
+    if (entry.thread) return entry.thread
+    if (!exists()) return null
+    entry.thread = this.parseThread(read())
+    return entry.thread
+  }
+
+  async disposeAll(): Promise<void> {
+    this.disposed = true
+    for (const entry of this.entries.values()) {
+      entry.unsubscribe?.()
+      if (entry.create) await entry.create.catch(() => undefined)
+      entry.session?.dispose()
+      entry.session = null
+    }
+    this.entries.clear()
+  }
+
+  private assertLive(): void {
+    if (this.disposed) throw new PrimeSdkError('captain host is disposed')
+  }
+
+  private ensureEntry(uuid: string): HostEntry {
+    let entry = this.entries.get(uuid)
+    if (!entry) {
+      entry = { session: null, create: null, working: false, thread: null, unsubscribe: null }
+      this.entries.set(uuid, entry)
+    }
+    return entry
+  }
+
+  private async entryFor(uuid: string): Promise<HostEntry> {
+    this.assertLive()
+    const known = await this.assertKnownWorkspace(uuid)
+    if (!known) throw new Error(`unknown workspace: ${uuid}`)
+    const entry = this.ensureEntry(uuid)
+    if (entry.create) {
+      await entry.create
+      return entry
+    }
+    entry.create = this.createSession(uuid)
     try {
-      const { session } = await sdk.createAgentSession({
-        cwd,
-        sessionManager: sdk.SessionManager.inMemory()
-      })
-      return session as unknown as PrimeSession
+      await entry.create
+    } catch (cause) {
+      entry.create = null
+      throw cause
+    }
+    return entry
+  }
+
+  private async assertKnownWorkspace(uuid: string): Promise<boolean> {
+    const { WorkspaceStore } = await import('./workspaces')
+    const store = new WorkspaceStore(this.home)
+    try {
+      return store.list().some((item) => item.uuid === uuid)
+    } finally {
+      store.close()
+    }
+  }
+
+  private async createSession(uuid: string): Promise<void> {
+    const module = await this.loadModule()
+    const cwd = workspaceDir(this.home, uuid)
+    const agentDir = primeWorkspaceAgentDir(this.home, uuid)
+    const sessionsDir = primeWorkspaceSessionsDir(this.home, uuid)
+    mkdirSync(sessionsDir, { recursive: true })
+    mkdirSync(agentDir, { recursive: true })
+    writeMarker(agentDir)
+    const sessionManager = module.SessionManager.continueRecent(cwd, sessionsDir)
+    let result: CreateSessionResult
+    try {
+      result = await module.createAgentSession({ cwd, agentDir, sessionManager })
     } catch (cause) {
       throw new PrimeSdkError('Prime session could not be created', { cause })
     }
+    const entry = this.ensureEntry(uuid)
+    entry.session = result.session
+    entry.unsubscribe = result.session.subscribe((event) => this.onEvent(uuid, event))
+  }
+
+  private onEvent(uuid: string, event: PrimeSessionEvent): void {
+    const entry = this.entries.get(uuid)
+    if (!entry) return
+    if (event.type === 'agent_end') {
+      // The captain may have written files during the turn; push a refresh.
+      for (const listener of this.fileListeners) listener(uuid)
+      return
+    }
+    if (!entry.thread || entry.thread.length === 0) return
+    const last = entry.thread[entry.thread.length - 1]
+    const message = event.assistantMessageEvent
+    if (
+      event.type === 'message_update' &&
+      message?.type === 'text_delta' &&
+      typeof message.delta === 'string' &&
+      last.role === 'assistant'
+    ) {
+      last.text += message.delta
+    }
+  }
+
+  private parseThread(raw: string): ThreadMessage[] {
+    try {
+      const parsed: unknown = JSON.parse(raw)
+      if (!Array.isArray(parsed)) return []
+      return parsed.filter(
+        (item): item is ThreadMessage =>
+          typeof item === 'object' &&
+          item !== null &&
+          ((item as { role?: unknown }).role === 'assistant' ||
+            (item as { role?: unknown }).role === 'user') &&
+          typeof (item as { text?: unknown }).text === 'string'
+      )
+    } catch {
+      return []
+    }
+  }
+
+  private setWorking(uuid: string, working: boolean): void {
+    const entry = this.entries.get(uuid)
+    if (!entry || entry.working === working) return
+    entry.working = working
+    for (const listener of this.workingListeners) listener()
+  }
+
+  private async loadModule(): Promise<PrimeModule> {
+    if (this.module) return this.module
+    if (!this.moduleLoad) {
+      const loader = this.pickLoader()
+      this.moduleLoad = loader()
+    }
+    try {
+      this.module = await this.moduleLoad
+      return this.module
+    } catch (cause) {
+      this.moduleLoad = null
+      throw new PrimeSdkError('Prime SDK failed to load in the main process', { cause })
+    }
+  }
+
+  private pickLoader(): PrimeModuleLoader {
+    return this.loader
   }
 }
 
-function textDelta(event: PrimeSessionEvent): string | null {
-  const message = event.assistantMessageEvent
-  if (event.type !== 'message_update' || !message) return null
-  if (message.type !== 'text_delta' || typeof message.delta !== 'string') return null
-  return message.delta
+function writeMarker(agentDir: string): void {
+  const { writeFileSync } = require('node:fs') as typeof import('node:fs')
+  writeFileSync(join(agentDir, 'marker'), 'cohort')
 }
 
-export async function promptForReply(
-  factory: PrimeSessionFactory,
-  cwd: string,
-  text: string
-): Promise<string> {
-  const session = await factory({ cwd })
-  let reply = ''
-  const unsubscribe = session.subscribe((event) => {
-    const delta = textDelta(event)
-    if (delta !== null) reply += delta
-  })
-  try {
-    await session.prompt(text)
-  } finally {
-    unsubscribe()
-    session.dispose()
-  }
-  return reply
-}
+export { loadPrimeModule }

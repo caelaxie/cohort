@@ -61,6 +61,8 @@ export function copyFilesIntoWorkspace(home: string, uuid: string, sources: stri
   return { copied, total: sources.length, error: copied === sources.length ? undefined : lastError }
 }
 
+const RESERVED_ROOT = '.prime'
+
 function collectRegularFiles(absDir: string, prefix: string, out: string[]): void {
   let entries: string[]
   try {
@@ -76,6 +78,9 @@ function collectRegularFiles(absDir: string, prefix: string, out: string[]): voi
         continue
       }
       const relative = prefix ? `${prefix}/${name}` : name
+      if (prefix === '' && name === RESERVED_ROOT) {
+        continue
+      }
       if (stat.isFile()) {
         out.push(relative)
         continue

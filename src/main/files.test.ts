@@ -223,4 +223,27 @@ describe('listWorkspaceFiles', () => {
     expect(listWorkspaceFiles(home, a.workspace.uuid)).toEqual(['from-a.txt'])
     store.close()
   })
+
+  it('excludes the reserved captain history directory from the name list (AE8)', () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const created = store.create('A')
+    const dir = workspaceDir(home, created.workspace.uuid)
+    writeFileSync(join(dir, 'notes.md'), 'n')
+    const sessions = join(dir, '.prime', 'agent', 'sessions')
+    mkdirSync(sessions, { recursive: true })
+    writeFileSync(join(sessions, 'session.jsonl'), '{}')
+    expect(listWorkspaceFiles(home, created.workspace.uuid)).toEqual(['notes.md'])
+    store.close()
+  })
+
+  it('lists captain-written owner files in the workspace (AE3)', () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const created = store.create('A')
+    const dir = workspaceDir(home, created.workspace.uuid)
+    writeFileSync(join(dir, 'captain-draft.txt'), 'from the captain')
+    expect(listWorkspaceFiles(home, created.workspace.uuid)).toEqual(['captain-draft.txt'])
+    store.close()
+  })
 })

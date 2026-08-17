@@ -1,81 +1,230 @@
-import { describe, expect, it } from 'vitest'
-import {
-  PrimeSdkError,
-  createPrimeSessionFactory,
-  promptForReply,
-  type PrimeSession,
-  type PrimeSessionEvent
-} from './captain'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import { CaptainHost, PrimeSdkError, type PrimeModule } from './captain'
+import { WorkspaceStore } from './workspaces'
 
-type RecordedSession = {
-  session: PrimeSession
-  prompts: string[]
-  events: PrimeSessionEvent[]
-  disposed: boolean
-  unsubscribed: boolean
+const homes: string[] = []
+
+function tempHome(): string {
+  const home = mkdtempSync(join(tmpdir(), 'cohort-captain-'))
+  homes.push(home)
+  return home
 }
 
-function fakeSession(replies: string[], events: PrimeSessionEvent[]): RecordedSession {
-  const recorded: RecordedSession = {
-    prompts: [],
-    events,
-    disposed: false,
-    unsubscribed: false,
-    session: null as unknown as PrimeSession
+afterEach(() => {
+  for (const home of homes.splice(0)) {
+    rmSync(home, { recursive: true, force: true })
   }
-  recorded.session = {
-    prompt: async (text: string) => {
-      recorded.prompts.push(text)
-      for (const event of events) {
-        for (const listener of listeners) listener(event)
-      }
-      void replies
-    },
-    subscribe: (listener) => {
-      listeners.push(listener)
-      return () => {
-        recorded.unsubscribed = true
-      }
-    },
-    dispose: () => {
-      recorded.disposed = true
-    }
-  }
-  const listeners: Array<(event: PrimeSessionEvent) => void> = []
-  return recorded
-}
-
-describe('captain spike', () => {
-  it('collects the assistant reply from session events', async () => {
-    const events: PrimeSessionEvent[] = [
-      { type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'hm' } },
-      { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Hi ' } },
-      { type: 'message_end' },
-      { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'there' } }
-    ]
-    const recorded = fakeSession([], events)
-    const reply = await promptForReply(async () => recorded.session, '/tmp/spike-cwd', 'hello')
-    expect(reply).toBe('Hi there')
-    expect(recorded.prompts).toEqual(['hello'])
-    expect(recorded.disposed).toBe(true)
-    expect(recorded.unsubscribed).toBe(true)
-  })
-
-  it('surfaces a typed error when the SDK module cannot be loaded', async () => {
-    const factory = createPrimeSessionFactory(async () => {
-      throw new Error("Cannot find module '@earendil-works/pi-coding-agent'")
-    })
-    await expect(factory({ cwd: '/tmp/spike-cwd' })).rejects.toBeInstanceOf(PrimeSdkError)
-  })
-
-  it(
-    'loads the real SDK and creates an in-process session',
-    { skip: process.env.COHORT_PRIME_SPIKE !== '1' },
-    async () => {
-      const factory = createPrimeSessionFactory()
-      const session = await factory({ cwd: '/tmp/cohort-prime-spike' })
-      expect(typeof session.prompt).toBe('function')
-      session.dispose()
-    }
-  )
 })
+
+type CapturedBindings = {
+  cwd: string
+  agentDir: string
+  sessionDir: string
+  prompts: string[]
+}
+
+function fakeModule(): { module: PrimeModule; captured: CapturedBindings[] } {
+  const captured: CapturedBindings[] = []
+  const module: PrimeModule = {
+    createAgentSession: async (options) => {
+      const manager = options.sessionManager as { sessionDir?: string }
+      captured.push({
+        cwd: options.cwd,
+        agentDir: options.agentDir,
+        sessionDir: String(manager.sessionDir),
+        prompts: []
+      })
+      let reply = ''
+      const listeners: Array<(event: unknown) => void> = []
+      return {
+        session: {
+          prompt: async (text: string) => {
+            captured[captured.length - 1].prompts.push(text)
+            for (const listener of listeners) {
+              listener({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: text } })
+              listener({ type: 'message_end' })
+              listener({ type: 'agent_end' })
+            }
+            void reply
+          },
+          subscribe: (listener: (event: unknown) => void) => {
+            listeners.push(listener)
+            return () => undefined
+          },
+          dispose: () => undefined
+        },
+        get reply() {
+          return reply
+        },
+        set reply(value: string) {
+          reply = value
+        }
+      } as unknown as Awaited<ReturnType<PrimeModule['createAgentSession']>>
+    },
+    SessionManager: {
+      create: (_cwd: string, sessionDir: string) => ({ sessionDir }),
+      continueRecent: (_cwd: string, sessionDir: string) => ({ sessionDir }),
+      inMemory: () => ({})
+    }
+  }
+  return { module, captured }
+}
+
+describe('CaptainHost isolation (U3)', () => {
+  it('pins cwd, agentDir, and sessionDir to one workspace uuid (AE4)', async () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const a = store.create('A')
+    const b = store.create('B')
+    const { module, captured } = fakeModule()
+    const host = new CaptainHost(home, async () => module)
+    await host.send(a.workspace.uuid, 'hello A')
+    await host.send(b.workspace.uuid, 'hello B')
+    expect(captured).toHaveLength(2)
+    const [aBind, bBind] = captured
+    expect(aBind.cwd).toContain(a.workspace.uuid)
+    expect(aBind.cwd).not.toContain(b.workspace.uuid)
+    expect(aBind.agentDir).toContain(a.workspace.uuid)
+    expect(aBind.sessionDir).toContain(a.workspace.uuid)
+    expect(bBind.cwd).toContain(b.workspace.uuid)
+    expect(bBind.agentDir).not.toBe(aBind.agentDir)
+    expect(bBind.sessionDir).not.toBe(aBind.sessionDir)
+    expect(aBind.prompts).toEqual(['hello A'])
+    expect(bBind.prompts).toEqual(['hello B'])
+    await host.disposeAll()
+    store.close()
+  })
+
+  it('reuses one session per uuid and keeps thread state between sends', async () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const a = store.create('A')
+    const { module, captured } = fakeModule()
+    const host = new CaptainHost(home, async () => module)
+    await host.send(a.workspace.uuid, 'first')
+    await host.send(a.workspace.uuid, 'second')
+    expect(captured).toHaveLength(1)
+    expect(captured[0].prompts).toEqual(['first', 'second'])
+    await host.disposeAll()
+    store.close()
+  })
+
+  it('rejects an unknown or unsafe uuid before opening any session', async () => {
+    const home = tempHome()
+    const { module, captured } = fakeModule()
+    const host = new CaptainHost(home, async () => module)
+    await expect(host.send('not-a-uuid', 'hi')).rejects.toThrow(/unknown workspace/)
+    await expect(
+      host.send('99999999-9999-4999-8999-999999999999', 'hi')
+    ).rejects.toThrow(/unknown workspace/)
+    expect(captured).toHaveLength(0)
+    await host.disposeAll()
+  })
+
+  it('wraps SDK load and create failures in PrimeSdkError', async () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const a = store.create('A')
+    const failing = {
+      ...fakeModule().module,
+      createAgentSession: async () => {
+        throw new Error('nope')
+      }
+    } as unknown as PrimeModule
+    const host = new CaptainHost(home, async () => failing)
+    await expect(host.send(a.workspace.uuid, 'hi')).rejects.toBeInstanceOf(PrimeSdkError)
+    await host.disposeAll()
+    store.close()
+  })
+
+  it('reports working state while a turn is in flight and idle after (AE1)', async () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const a = store.create('A')
+    const { module } = fakeModule()
+    const host = new CaptainHost(home, async () => module)
+    const seen: boolean[] = []
+    host.onWorkingChange(() => {
+      seen.push(host.isWorking(a.workspace.uuid))
+    })
+    await host.send(a.workspace.uuid, 'hello')
+    expect(host.isWorking(a.workspace.uuid)).toBe(false)
+    expect(seen).toContain(true)
+    await host.disposeAll()
+    store.close()
+  })
+
+  it('loads a saved thread from the reserved history directory on demand (AE7)', async () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const a = store.create('A')
+    const { module } = fakeModule()
+    const host = new CaptainHost(home, async () => module)
+    await host.send(a.workspace.uuid, 'remember this')
+    // Simulate a persisted thread on disk after quit.
+    const agentDir = join(home, 'workspaces', a.workspace.uuid, '.prime', 'agent')
+    const threadFile = join(agentDir, 'thread.json')
+    writeFileSync(
+      threadFile,
+      JSON.stringify([
+        { role: 'user', text: 'remember this' },
+        { role: 'assistant', text: 'saved reply' }
+      ])
+    )
+    const fresh = new CaptainHost(home, async () => module)
+    const thread = await fresh.loadThread(
+      a.workspace.uuid,
+      () => existsSync(threadFile),
+      () => readFileSync(threadFile, 'utf8')
+    )
+    expect(thread).toEqual([
+      { role: 'user', text: 'remember this' },
+      { role: 'assistant', text: 'saved reply' }
+    ])
+    const empty = new CaptainHost(home, async () => module)
+    const missing = await empty.loadThread(
+      a.workspace.uuid,
+      () => false,
+      () => ''
+    )
+    expect(missing).toBeNull()
+    await host.disposeAll()
+    await fresh.disposeAll()
+    store.close()
+  })
+
+  it('keeps session files inside the workspace .prime directory (KTD6)', async () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const a = store.create('A')
+    const { module } = fakeModule()
+    const host = new CaptainHost(home, async () => module)
+    await host.send(a.workspace.uuid, 'hi')
+    const workspaceRoot = join(home, 'workspaces', a.workspace.uuid)
+    const agentDir = join(workspaceRoot, '.prime', 'agent')
+    expect(existsSync(agentDir)).toBe(true)
+    expect(readFileSync(join(agentDir, 'marker'), 'utf8')).toBe('cohort')
+    await host.disposeAll()
+    store.close()
+  })
+
+  it('surfacing a file-change event calls the registered listener (AE3 push seam)', async () => {
+    const home = tempHome()
+    const store = new WorkspaceStore(home)
+    const a = store.create('A')
+    const { module } = fakeModule()
+    const host = new CaptainHost(home, async () => module)
+    const seen: string[] = []
+    host.onFileChange((uuid) => {
+      seen.push(uuid)
+    })
+    await host.send(a.workspace.uuid, 'write a file')
+    expect(seen).toEqual([a.workspace.uuid])
+    await host.disposeAll()
+    store.close()
+  })
+})
+
