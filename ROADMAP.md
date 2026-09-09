@@ -1,46 +1,53 @@
 # Cohort roadmap
 
-Personal crew: local workspaces, one captain per workspace, boxed specialists.
-Runtime: Prime Agent, embedded in the app. One session per workspace.
-The first mission stays open. v1 is for you.
+Open-source Grok Bot: named AI teammates on this Mac.
+The lead bot is **Hatch**. Runtime: Prime Agent, embedded. Browser hands on this Mac while the app is open.
+v1 is for you. The crew is the product — do not invent a first vertical.
+
+This branch redefines the product. It does not ship the reshape.
+
+Authority for behavior: `docs/plans/2026-09-09-1325-feat-hatch-grok-bot-alternative-plan.md`.
 
 ## v1 — Personal crew
 
-- [ ] Create and reopen a local workspace (files + chat stay with it)
-- [ ] Create more workspaces when needed
-- [ ] Each workspace has one captain; that captain stays inside the workspace
-- [ ] Talk to the current workspace’s captain to run it
-- [ ] Captain can create a custom agent for its workspace
-- [ ] Captain can direct specialists and change files only in its workspace
-- [ ] Captain and specialists can only see their own workspace
-- [ ] Each workspace is a sandbox; agents run autonomously inside it
-- [ ] Agents can create tools for themselves, on request or automatically
-- [ ] New tools stay in the workspace that created them
-- [ ] Agent runtime is embedded in the app and can be customized
-- [ ] Use it on a real mission of your own
+- [ ] Named bots are the home screen (not workspaces)
+- [ ] Hatch is the lead bot on that roster
+- [ ] Talk to Hatch and hatched bots as teammates
+- [ ] Hatch can hatch another named bot
+- [ ] Hatch can coordinate other bots
+- [ ] Shared room: you, Hatch, and other bots in one thread
+- [ ] This Mac is the computer while Cohort is open
+- [ ] Bots use the browser you are already logged into (one shared login)
+- [ ] Ask first before send, post, buy, or delete
+- [ ] Prime Agent embedded as the kernel (not the Prime CLI)
+- [ ] Bring your own model subscriptions; no Cohort weekly cap
+- [ ] Closing Cohort stops the bots
+- [ ] Use it on a real job of your own
 
-## v2 — Multi-mission
+## v2 — More hands
 
-- [ ] Switching workspaces feels natural (you meet that workspace’s captain)
-- [ ] A captain can see or summarize other workspaces
-- [ ] Those summaries are good enough to trust
+- [ ] Native Mac apps, not only the browser
+- [ ] Switching among bots and rooms feels like talking to a small team
 
-## v3 — Shared memory
+## v3 — Remote computer
 
-- [ ] Captain can promote a chosen result into a knowledge base
-- [ ] No live dump across workspaces
-- [ ] Specialists can use only what was promoted
+- [ ] Hosted remote computer
+- [ ] Overnight and lid-closed work
+- [ ] Same approval rules as local
 
-## v4 — Remote
+## v4 — Company
 
-- [ ] Hosted remote workspace
-- [ ] Same visibility rules as local
+- [ ] Cohort at company scale
+- [ ] Other users
+- [ ] No Grok Bot weekly cap is still the point: people bring their own models
 
 ## Later
 
-- [ ] File history in a workspace
-- [ ] Search over chat history
-- [ ] Agent-to-agent protocol
-- [ ] Pluggable runtimes
-- [ ] Cloud / CI sandboxes
-- [ ] Other users
+- [ ] iOS
+- [ ] Learned routines and schedules
+- [ ] File history and search over chat
+- [ ] What remains of the leftover workspace/files app
+
+## Leftover, not the product
+
+The current desktop loop (workspace roster, add-files, Boxlite `/workspace`, look-only files rail) is leftover. Do not extend it as Cohort v1.
