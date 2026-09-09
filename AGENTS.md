@@ -1,36 +1,39 @@
 # Cohort
 
-Personal crew: local workspaces, one captain per workspace, boxed specialists.
-v1 is for the owner. The first mission is unnamed — do not invent one.
+Open-source Grok Bot: named AI teammates on this Mac.
+The lead bot is **Hatch**. v1 is for the owner. Do not invent a first vertical — the crew is the product.
 
-See `ROADMAP.md` for sequence. Build the current unchecked v1 items only.
+See `ROADMAP.md` for sequence. This branch redefines the product. Do not implement the reshape here unless asked.
+Behavior IDs live in `docs/plans/2026-09-09-1325-feat-hatch-grok-bot-alternative-plan.md`.
 
 ## Runtime
 
-v1 uses **Prime Agent**, embedded in the app. One Prime session per workspace. Do not use Deep Agents. Do not shell out to the Prime CLI as the kernel.
+v1 uses **Prime Agent**, embedded in the app. Do not use Deep Agents. Do not shell out to the Prime CLI as the kernel.
+A computer-use driver is the hands, not the kernel.
 
 ## Product rules
 
-- Each workspace has one captain. That captain belongs to that workspace only.
-- The captain is workspace-isolated: it can see only that workspace’s prompts, files, chat, and other state.
-- You talk to the current workspace’s captain to run it.
-- The captain can create specialists for its workspace. Those agents belong to that workspace only.
-- The captain can direct specialists and change files only in its workspace.
-- Every agent is highly autonomous inside its box.
-- An agent can create tools for itself, on request or on its own. New tools stay in that workspace.
-- The agent runtime must be embeddable and customizable in the Cohort app. Do not shell out to a separate agent product as the kernel.
-- Each workspace is a sandboxed environment. Captain and specialists cannot leave it.
-- Captain and specialists can only see files and chat in their own workspace.
-- History stays with the workspace.
-- “Summarize a list of files” is a demo, not the required first flow.
+- Cohort is the product. Hatch is the lead bot, not the product name.
+- Home is a roster of named bots, not workspaces. Hatch is on that roster.
+- You talk to Hatch and to the bots it hatches as teammates.
+- Hatch can hatch another named bot.
+- Hatch can coordinate other bots.
+- The owner can sit in a shared room with Hatch and several bots at once.
+- The computer is this Mac while Cohort is open. Work stops when Cohort closes.
+- Hands in v1 are the browser the owner is already logged into. Bots share that one login.
+- Before send, post, buy, or delete in the browser, the bot waits for the owner's yes. Only the owner can approve.
+- The owner brings their own model subscriptions. Cohort does not impose a weekly cap.
+- The agent runtime must be embeddable in the Cohort app. Do not shell out to a separate agent product as the kernel.
 
 ## Out of v1
 
-A captain that can see or summarize other workspaces. Shared knowledge base, remote workspaces, other users, a general agent-to-agent protocol, pluggable runtimes, cloud sandboxes. Local workspace sandbox is assumed, not a later extra.
+Native Mac apps as hands. A hosted remote computer. Overnight and lid-closed work. Company-scale use and other users. iOS. Learned routines and 24/7 schedules. A sealed workspace sandbox as the computer. Workspaces as the home screen.
+
+The workspace roster, add-files loop, and Boxlite box in the current app are leftover, not the product.
 
 ## Working here
 
-- Use Prime Agent for captain and specialists. Pin each captain and each specialist to one workspace box. No host-wide Prime daemon across workspaces.
 - Prefer the smallest change that preserves the rules above.
 - Do not add users, cloud, or a knowledge base while v1 is open.
 - Do not treat this repo’s `.agents/skills` as product code.
+- Do not implement this reshape on this branch unless the owner asks. Redefine docs and the Product Contract only.

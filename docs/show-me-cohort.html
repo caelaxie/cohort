@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cohort — current understanding</title>
+  <style>
+    :root {
+      --canvas: #010102;
+      --surface: #0f1011;
+      --surface-2: #141516;
+      --hairline: #23252a;
+      --ink: #f7f8f8;
+      --muted: #d0d6e0;
+      --subtle: #8a8f98;
+      --accent: #5e6ad2;
+      --accent-hover: #828fff;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--canvas); color: var(--ink); }
+    body {
+      font: 16px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, system-ui, sans-serif;
+      letter-spacing: -0.02em;
+    }
+    main {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 32px 20px 80px;
+    }
+    .eyebrow {
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin: 0 0 8px;
+    }
+    h1 {
+      font-size: clamp(32px, 6vw, 48px);
+      font-weight: 600;
+      letter-spacing: -0.04em;
+      line-height: 1.1;
+      margin: 0 0 12px;
+    }
+    .lede {
+      color: var(--muted);
+      font-size: 18px;
+      max-width: 40rem;
+      margin: 0 0 40px;
+    }
+    h2 {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -0.03em;
+      margin: 0 0 16px;
+    }
+    p { margin: 0 0 12px; color: var(--muted); }
+    section {
+      background: var(--surface);
+      border: 1px solid var(--hairline);
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+    .names {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .card {
+      background: var(--surface-2);
+      border: 1px solid var(--hairline);
+      border-radius: 8px;
+      padding: 16px 18px;
+    }
+    .card strong { display: block; font-size: 18px; margin-bottom: 4px; color: var(--ink); }
+    .card span { color: var(--subtle); font-size: 14px; }
+    .window {
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      min-height: 280px;
+      border: 1px solid var(--hairline);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--canvas);
+    }
+    .rail {
+      border-right: 1px solid var(--hairline);
+      padding: 16px 12px;
+    }
+    .rail h3 {
+      margin: 0 0 12px;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--subtle);
+      font-weight: 500;
+    }
+    .bot {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      color: var(--muted);
+      font-size: 14px;
+      margin-bottom: 4px;
+    }
+    .bot.lead {
+      background: #5e6ad222;
+      color: var(--ink);
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 99px;
+      background: var(--accent);
+      flex: none;
+    }
+    .bot:not(.lead) .dot { background: #3e3e44; }
+    .stage { padding: 16px 18px; display: flex; flex-direction: column; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+    .tab {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      color: var(--subtle);
+      border: 1px solid transparent;
+    }
+    .tab.on {
+      color: var(--ink);
+      background: var(--surface-2);
+      border-color: var(--hairline);
+    }
+    .msg {
+      font-size: 14px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      max-width: 92%;
+    }
+    .msg.you { background: var(--surface-2); color: var(--muted); }
+    .msg.hatch {
+      background: #5e6ad218;
+      color: var(--ink);
+      border: 1px solid #5e6ad244;
+    }
+    .msg.tiny { color: var(--subtle); font-size: 12px; }
+    .layers {
+      display: grid;
+      gap: 8px;
+    }
+    .layer {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 12px;
+      align-items: center;
+      padding: 10px 12px;
+      border: 1px solid var(--hairline);
+      border-radius: 8px;
+      background: var(--canvas);
+    }
+    .layer b { color: var(--accent); font-size: 13px; font-weight: 600; }
+    .layer span { color: var(--muted); font-size: 14px; }
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .col h3 {
+      margin: 0 0 10px;
+      font-size: 13px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--subtle);
+      font-weight: 500;
+    }
+    ul { margin: 0; padding: 0 0 0 18px; color: var(--muted); }
+    li { margin: 0 0 6px; }
+    .later li { color: var(--subtle); }
+    .gate {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .pill {
+      border: 1px solid var(--hairline);
+      background: var(--canvas);
+      border-radius: 999px;
+      padding: 6px 12px;
+      color: var(--ink);
+      font-size: 13px;
+    }
+    .pill.warn { border-color: #5e6ad2; color: var(--accent-hover); }
+    .arrow { color: var(--subtle); }
+    @media (max-width: 720px) {
+      .names, .window, .split, .layer { grid-template-columns: 1fr; }
+      .window { min-height: 0; }
+      .rail { border-right: 0; border-bottom: 1px solid var(--hairline); }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">Product definition — not the leftover app</p>
+    <h1>Cohort is the app.<br />Hatch is the lead bot.</h1>
+    <p class="lede">Open-source Grok Bot for you, on this Mac. Named teammates. Hatch makes more bots and can run the crew. They use the browser you are already logged into, and they ask before they send, post, buy, or delete.</p>
+
+    <section>
+      <h2>Two names</h2>
+      <div class="names">
+        <div class="card">
+          <strong>Cohort</strong>
+          <span>The product. The window you open. Your Grok Bot alternative.</span>
+        </div>
+        <div class="card">
+          <strong>Hatch</strong>
+          <span>The lead bot inside Cohort. It hatches teammates and can coordinate them.</span>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>What you open</h2>
+      <p>Home is a list of bots, not workspaces. Hatch sits at the top. You can talk to Hatch alone, or sit in a room with Hatch and the bots it made.</p>
+      <div class="window" aria-label="Cohort window sketch">
+        <aside class="rail">
+          <h3>Bots</h3>
+          <div class="bot lead"><span class="dot"></span> Hatch</div>
+          <div class="bot"><span class="dot"></span> Research</div>
+          <div class="bot"><span class="dot"></span> Inbox</div>
+        </aside>
+        <div class="stage">
+          <div class="tabs">
+            <span class="tab">Hatch</span>
+            <span class="tab on">Room</span>
+          </div>
+          <div class="msg you">Hatch, make a bot that drafts follow-ups, then put both of you in here.</div>
+          <div class="msg hatch">Hatched Inbox. I’ll coordinate. Inbox is in the room.</div>
+          <div class="msg tiny">Inbox wants to send a mail → waiting for your yes</div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>How a Tuesday works</h2>
+      <div class="layers">
+        <div class="layer"><b>You</b><span>Talk to Hatch. Approve send / post / buy / delete.</span></div>
+        <div class="layer"><b>Cohort</b><span>The app. Open = bots can work. Closed = they stop.</span></div>
+        <div class="layer"><b>Hatch</b><span>Lead bot. Hatches teammates. Can coordinate the room.</span></div>
+        <div class="layer"><b>Teammates</b><span>Named bots Hatch created. You can talk to them too.</span></div>
+        <div class="layer"><b>This Mac</b><span>The computer, only while Cohort is open. Shared browser login.</span></div>
+        <div class="layer"><b>Prime Agent</b><span>The engine inside Cohort. Not the Prime CLI. Your models, no weekly cap.</span></div>
+      </div>
+      <p style="margin-top:16px">Hard move in the browser:</p>
+      <div class="gate">
+        <span class="pill">Bot is about to send</span>
+        <span class="arrow">→</span>
+        <span class="pill warn">Stop. Ask you</span>
+        <span class="arrow">→</span>
+        <span class="pill">You say yes or no</span>
+      </div>
+    </section>
+
+    <section>
+      <h2>Now vs later</h2>
+      <div class="split">
+        <div class="col">
+          <h3>v1 — you</h3>
+          <ul>
+            <li>Bot list as home</li>
+            <li>Hatch hatches and coordinates</li>
+            <li>Shared room</li>
+            <li>This Mac + logged-in browser</li>
+            <li>Ask first on send, post, buy, delete</li>
+            <li>Your own model keys</li>
+            <li>Stops when you close Cohort</li>
+          </ul>
+        </div>
+        <div class="col">
+          <h3>Not v1</h3>
+          <ul class="later">
+            <li>Native Mac apps</li>
+            <li>Remote computer / overnight</li>
+            <li>Company-wide Cohort</li>
+            <li>iOS</li>
+            <li>Workspace list as home</li>
+            <li>Sealed box as the computer</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>What the code is today</h2>
+      <p>The running app is still the old loop: workspace list, add files, a Boxlite box. That is leftover. It is not Cohort v1.</p>
+    </section>
+  </main>
+</body>
+</html>
