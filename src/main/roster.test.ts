@@ -103,8 +103,8 @@ describe('RosterStore.setCurrent', () => {
 })
 
 describe('parseRoster', () => {
-  it('throws on leftover workspaces', () => {
-    expect(() => parseRoster({ workspaces: [] })).toThrow()
+  it('throws without hatch', () => {
+    expect(() => parseRoster({ others: [], current: 'hatch' })).toThrow('invalid hatch')
   })
 
   it('accepts Hatch as the only member', () => {

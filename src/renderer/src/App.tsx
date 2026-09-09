@@ -1,32 +1,45 @@
 import { useEffect, useState } from 'react'
 import { BotMain } from '@/components/bot-main'
 import { BotSidebar } from '@/components/bot-sidebar'
-import { blockedView, openingView, readyView, type BotId, type HomeView } from '../../shared/roster'
+import {
+  hatchOnlyRoster,
+  type BotId,
+  type HomeView,
+  type Roster
+} from '../../shared/roster'
+
+function viewWith(roster: Roster, error: string | null = null): HomeView {
+  return { roster, error }
+}
 
 function App(): React.JSX.Element {
   const [view, setView] = useState<HomeView>(() =>
-    window.cohort ? openingView() : blockedView('The app bridge is missing. Restart Cohort.')
+    window.cohort
+      ? viewWith(hatchOnlyRoster())
+      : viewWith(hatchOnlyRoster(), 'The app bridge is missing. Restart Cohort.')
   )
 
   useEffect(() => {
     if (!window.cohort) return
     void window.cohort
       .roster()
-      .then((roster) => setView(readyView(roster)))
+      .then((roster) => setView(viewWith(roster)))
       .catch((reason: unknown) => {
-        setView(blockedView(reason instanceof Error ? reason.message : 'Could not load bots'))
+        const message = reason instanceof Error ? reason.message : 'Could not load bots'
+        setView((prev) => viewWith(prev.roster, message))
       })
-    return window.cohort.onState((roster) => setView(readyView(roster)))
+    return window.cohort.onState((roster) => setView(viewWith(roster)))
   }, [])
 
   const onSelect = (id: BotId): void => {
-    if (view.status === 'ready' && view.roster.current === id) return
+    if (view.roster.current === id) return
     if (!window.cohort) return
     void window.cohort
       .setCurrent(id)
-      .then((roster) => setView(readyView(roster)))
+      .then((roster) => setView(viewWith(roster)))
       .catch((reason: unknown) => {
-        setView(blockedView(reason instanceof Error ? reason.message : 'Could not switch bot'))
+        const message = reason instanceof Error ? reason.message : 'Could not switch bot'
+        setView((prev) => viewWith(prev.roster, message))
       })
   }
 

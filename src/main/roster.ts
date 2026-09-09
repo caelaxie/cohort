@@ -26,32 +26,20 @@ export class RosterStore {
 
   load(): Roster {
     const others = this.listTeammates()
-    const stored = this.readCurrentId()
-    let current: BotId | null = null
-    if (stored !== null) {
-      try {
-        const parsed = parseBotId(stored)
-        if (this.isKnown(parsed, others)) current = parsed
-      } catch {
-        current = null
-      }
-    }
-    if (current === null) {
-      this.writeCurrent(HATCH_ID)
-      current = HATCH_ID
-    }
+    const current = this.resolvedCurrent(others)
     return parseRoster({ hatch: HATCH, others, current })
   }
 
   setCurrent(id: BotId): Roster {
     const botId = parseBotId(id)
-    const roster = this.load()
-    if (roster.current === botId) return roster
-    if (!this.isKnown(botId, roster.others)) {
+    const others = this.listTeammates()
+    if (!this.isKnown(botId, others)) {
       throw new Error('unknown bot')
     }
-    this.writeCurrent(botId)
-    return this.load()
+    if (this.readCurrentId() !== botId) {
+      this.writeCurrent(botId)
+    }
+    return parseRoster({ hatch: HATCH, others, current: botId })
   }
 
   private listTeammates(): Teammate[] {
@@ -67,6 +55,20 @@ export class RosterStore {
       }
       return { id, name: row.name }
     })
+  }
+
+  private resolvedCurrent(others: readonly Teammate[]): BotId {
+    const stored = this.readCurrentId()
+    if (stored !== null) {
+      try {
+        const parsed = parseBotId(stored)
+        if (this.isKnown(parsed, others)) return parsed
+      } catch {
+        // invalid stored id
+      }
+    }
+    this.writeCurrent(HATCH_ID)
+    return HATCH_ID
   }
 
   private isKnown(id: BotId, others: readonly Teammate[]): boolean {

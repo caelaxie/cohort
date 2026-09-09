@@ -26,10 +26,10 @@ export type Roster = {
   readonly current: BotId
 }
 
-export type HomeView =
-  | { readonly status: 'opening'; readonly hatch: Hatch }
-  | { readonly status: 'ready'; readonly roster: Roster }
-  | { readonly status: 'blocked'; readonly hatch: Hatch; readonly message: string }
+export type HomeView = {
+  readonly roster: Roster
+  readonly error: string | null
+}
 
 export type CohortApi = {
   roster: () => Promise<Roster>
@@ -38,15 +38,6 @@ export type CohortApi = {
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-const LEFTOVER_FIELDS = [
-  'workspaces',
-  'files',
-  'box',
-  'boxStatus',
-  'boxError',
-  'folderError'
-] as const
 
 function isRecord(raw: unknown): raw is Record<string, unknown> {
   return raw !== null && typeof raw === 'object' && !Array.isArray(raw)
@@ -82,11 +73,6 @@ export function parseRoster(raw: unknown): Roster {
   if (!isRecord(raw)) {
     throw new Error('invalid roster')
   }
-  for (const field of LEFTOVER_FIELDS) {
-    if (Object.prototype.hasOwnProperty.call(raw, field)) {
-      throw new Error(`leftover field: ${field}`)
-    }
-  }
   const hatch = parseHatch(raw.hatch)
   if (!Array.isArray(raw.others)) {
     throw new Error('invalid roster')
@@ -106,6 +92,10 @@ export function parseRoster(raw: unknown): Roster {
   return { hatch, others, current }
 }
 
+export function hatchOnlyRoster(): Roster {
+  return { hatch: HATCH, others: [], current: HATCH_ID }
+}
+
 export function rosterBots(roster: Roster): readonly [Hatch, ...Teammate[]] {
   return [roster.hatch, ...roster.others]
 }
@@ -117,21 +107,4 @@ export function currentBot(roster: Roster): Bot {
     throw new Error('dangling current')
   }
   return teammate
-}
-
-export function openingView(): HomeView {
-  return { status: 'opening', hatch: HATCH }
-}
-
-export function readyView(roster: Roster): HomeView {
-  return { status: 'ready', roster }
-}
-
-export function blockedView(message: string): HomeView {
-  return { status: 'blocked', hatch: HATCH, message }
-}
-
-export function headingName(view: HomeView): string {
-  if (view.status === 'ready') return currentBot(view.roster).name
-  return view.hatch.name
 }

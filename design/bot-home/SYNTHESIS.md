@@ -43,4 +43,4 @@ From C3 into C2:
 
 ## Verification of the sketch
 
-Types in `types.ts` match the usage in `SKETCH.md`. Empty loaded roster is unrepresentable. `setCurrent` no-ops when already current. Box is not in the module map.
+Empty loaded roster is unrepresentable. `setCurrent` no-ops when already current. Box is not in the module map.
