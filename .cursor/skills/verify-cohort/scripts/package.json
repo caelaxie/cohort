@@ -1,0 +1,9 @@
+{
+  "name": "verify-cohort-harness",
+  "private": true,
+  "type": "module",
+  "description": "Playwright CDP harness for verifying the Cohort Electron window. Not part of the app.",
+  "dependencies": {
+    "playwright-core": "^1.55.0"
+  }
+}
