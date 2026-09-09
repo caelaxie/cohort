@@ -1,16 +1,13 @@
-import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { AddFilesResultDto, AppStateDto } from '../shared/workspace'
+import { contextBridge, ipcRenderer } from 'electron'
+import { parseRoster, type BotId, type Roster } from '../shared/roster'
 
 const cohort = {
-  list: (): Promise<AppStateDto> => ipcRenderer.invoke('cohort:list'),
-  create: (name: string): Promise<AppStateDto> => ipcRenderer.invoke('cohort:create', name),
-  setCurrent: (uuid: string): Promise<AppStateDto> => ipcRenderer.invoke('cohort:setCurrent', uuid),
-  addFiles: (paths?: string[]): Promise<AddFilesResultDto> =>
-    ipcRenderer.invoke('cohort:addFiles', paths),
-  pathsForFiles: (files: File[]): string[] => files.map((file) => webUtils.getPathForFile(file)),
-  onState: (listener: (state: AppStateDto) => void): (() => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, state: AppStateDto): void => {
-      listener(state)
+  roster: (): Promise<Roster> => ipcRenderer.invoke('cohort:roster').then(parseRoster),
+  setCurrent: (id: BotId): Promise<Roster> =>
+    ipcRenderer.invoke('cohort:setCurrent', id).then(parseRoster),
+  onState: (listener: (roster: Roster) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, raw: unknown): void => {
+      listener(parseRoster(raw))
     }
     ipcRenderer.on('cohort:state', handler)
     return () => {

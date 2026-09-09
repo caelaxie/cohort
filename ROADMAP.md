@@ -10,8 +10,8 @@ Authority for v1 behavior: this file.
 
 ## v1 — Personal crew
 
-- [ ] Named bots are the home screen (not workspaces)
-- [ ] Hatch is the lead bot on that roster (Hatch is not the product name)
+- [x] Named bots are the home screen (not workspaces)
+- [x] Hatch is the lead bot on that roster (Hatch is not the product name)
 - [ ] Talk to Hatch and hatched bots as teammates
 - [ ] Hatch can hatch another named bot
 - [ ] Hatch can coordinate other bots
