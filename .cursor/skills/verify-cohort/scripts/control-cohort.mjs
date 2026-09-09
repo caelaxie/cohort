@@ -353,7 +353,9 @@ async function cmdDoctor() {
     const { browser, page } = await connectPage(run)
     text = (await page.locator('body').innerText()).replace(/\s+/g, ' ').trim()
     await browser.close()
-    if (!text.includes('Workspaces')) problems.push('renderer did not paint Workspaces')
+    if (!text.includes('Crew') || !text.includes('Hatch')) {
+      problems.push('renderer did not paint Crew and Hatch')
+    }
     if (text.includes('The app bridge is missing')) {
       problems.push('window.cohort is missing; you are not in the Electron window')
     }
@@ -361,7 +363,7 @@ async function cmdDoctor() {
     problems.push(`renderer: ${error instanceof Error ? error.message : error}`)
   }
 
-  const workspaceCount = sqlite(run.home, 'select count(*) from workspaces;')
+  const teammateCount = sqlite(run.home, 'select count(*) from teammates;')
   writeRun(run)
   const summary = [
     `pid=${run.pid}`,
@@ -370,7 +372,7 @@ async function cmdDoctor() {
     `title=${title || '?'}`,
     `home=${run.home}`,
     `userData=${run.userData}`,
-    `workspaces=${workspaceCount}`,
+    `teammates=${teammateCount}`,
     `url=${url}`
   ].join(' ')
   if (problems.length) fail(`${problems.join('; ')} | ${summary}`)
@@ -470,9 +472,10 @@ async function cmdText() {
 
 function cmdRoster() {
   const run = readRun()
-  const rows = sqlite(run.home, "select uuid || '|' || name from workspaces order by created_at, uuid;")
-  const current = sqlite(run.home, "select value from meta where key='current_uuid';")
-  console.log(`current=${current || ''}`)
+  const rows = sqlite(run.home, "select uuid || '|' || name from teammates order by created_at, uuid;")
+  const current = sqlite(run.home, "select value from meta where key='current_id';")
+  console.log(`current=${current || 'hatch'}`)
+  console.log('hatch|Hatch')
   console.log(rows || '')
 }
 
