@@ -243,7 +243,7 @@ async function main() {
         const text = await cdp.evaljs(`(() => {
           ${PAGE_HELPERS}
           const lines = []
-          for (const el of document.querySelectorAll('h1, h2, [role="alert"], button, input, li, p')) {
+          for (const el of document.querySelectorAll('h1, h2, [role="alert"], button, input, label, li, p')) {
             if (!__visible(el)) continue
             const tag = el.tagName.toLowerCase()
             const role = el.getAttribute('role')

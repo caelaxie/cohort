@@ -5,7 +5,6 @@ import {
   parseKernelStatus,
   readyForTalk as statusReadyForTalk,
   type ConnectMethod,
-  type ConnectMethodId,
   type KernelStatus
 } from '../shared/kernel'
 
@@ -14,22 +13,28 @@ export type KernelOptions = {
   readonly primeAuthPath: string
 }
 
-type Provider = {
-  readonly id: 'xai' | 'openai' | 'anthropic'
+const COMPLETIONS_RECORD = 'openai-completions'
+
+type Shortcut = {
+  readonly id: 'xai' | 'openai'
   readonly env: string
   readonly model: string
-  readonly label: string
+  readonly baseUrl: string
 }
 
-const PROVIDERS: readonly Provider[] = [
-  { id: 'xai', env: 'XAI_API_KEY', model: 'grok-4.5', label: 'xAI' },
-  { id: 'openai', env: 'OPENAI_API_KEY', model: 'gpt-4.1', label: 'OpenAI' },
-  { id: 'anthropic', env: 'ANTHROPIC_API_KEY', model: 'claude-sonnet-4-5', label: 'Anthropic' }
+const SHORTCUTS: readonly Shortcut[] = [
+  { id: 'xai', env: 'XAI_API_KEY', model: 'grok-4.5', baseUrl: 'https://api.x.ai/v1' },
+  { id: 'openai', env: 'OPENAI_API_KEY', model: 'gpt-4.1', baseUrl: 'https://api.openai.com/v1' }
 ]
 
 type ConnectRequest =
   | { readonly kind: 'probe' }
-  | { readonly kind: 'paste'; readonly id: ConnectMethodId; readonly secret: string }
+  | {
+      readonly kind: 'paste'
+      readonly baseUrl: string
+      readonly model: string
+      readonly secret: string
+    }
 
 type AuthFile =
   | { readonly kind: 'missing' }
@@ -46,23 +51,33 @@ function isNotFound(reason: unknown): boolean {
   )
 }
 
-function pasteMethod(provider: Provider): ConnectMethod {
-  return {
-    id: parseConnectMethodId(provider.id),
-    label: provider.label,
-    kind: 'paste'
-  }
-}
-
 function connectMethods(): readonly ConnectMethod[] {
   return [
     {
       id: parseConnectMethodId('probe'),
       label: 'Use a key already on this Mac',
       kind: 'probe'
-    },
-    ...PROVIDERS.map(pasteMethod)
+    }
   ]
+}
+
+function parseBaseUrl(value: unknown): string {
+  if (typeof value !== 'string') {
+    throw new Error('invalid base url')
+  }
+  let url: URL
+  try {
+    url = new URL(value.trim())
+  } catch {
+    throw new Error('invalid base url')
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('invalid base url')
+  }
+  if (url.username !== '' || url.password !== '') {
+    throw new Error('invalid base url')
+  }
+  return url.href.replace(/\/+$/, '')
 }
 
 function parseConnectRequest(input: unknown): ConnectRequest {
@@ -78,19 +93,18 @@ function parseConnectRequest(input: unknown): ConnectRequest {
   if (input.kind !== 'paste') {
     throw new Error('invalid connect')
   }
-  const id = parseConnectMethodId(input.id)
   if (typeof input.secret !== 'string' || input.secret.trim().length === 0) {
     throw new Error('empty secret')
   }
-  return { kind: 'paste', id, secret: input.secret.trim() }
-}
-
-function providerForPaste(id: ConnectMethodId): Provider {
-  const provider = PROVIDERS.find((item) => item.id === id)
-  if (!provider) {
-    throw new Error('unknown method')
+  if (typeof input.model !== 'string' || input.model.trim().length === 0) {
+    throw new Error('empty model')
   }
-  return provider
+  return {
+    kind: 'paste',
+    baseUrl: parseBaseUrl(input.baseUrl),
+    model: input.model.trim(),
+    secret: input.secret.trim()
+  }
 }
 
 function envPresent(env: NodeJS.Dict<string>, name: string): boolean {
@@ -104,6 +118,22 @@ function filePresent(records: Record<string, unknown>, providerId: string): bool
     return false
   }
   return entry.key.trim().length > 0
+}
+
+function completionsRecord(
+  value: unknown
+): { readonly model: string; readonly baseUrl: string } | null {
+  if (!isRecord(value) || typeof value.key !== 'string' || value.key.trim().length === 0) {
+    return null
+  }
+  if (typeof value.model !== 'string' || value.model.trim().length === 0) {
+    return null
+  }
+  try {
+    return { model: value.model.trim(), baseUrl: parseBaseUrl(value.baseUrl) }
+  } catch {
+    return null
+  }
 }
 
 export class Kernel {
@@ -154,21 +184,24 @@ export class Kernel {
       })
     }
     const request = parseConnectRequest(input)
-    const status =
-      request.kind === 'probe' ? await this.probe() : await this.paste(request.id, request.secret)
+    const status = request.kind === 'probe' ? await this.probe() : await this.paste(request)
     this.current = status
     this.startGate = Promise.resolve(status)
     return status
   }
 
-  private async paste(id: ConnectMethodId, secret: string): Promise<KernelStatus> {
-    const provider = providerForPaste(id)
+  private async paste(request: Extract<ConnectRequest, { kind: 'paste' }>): Promise<KernelStatus> {
     const file = await this.readAuth()
     if (file.kind === 'unreadable') {
       throw new Error('auth file unreadable')
     }
     const records = file.kind === 'parsed' ? { ...file.records } : {}
-    records[provider.id] = { type: 'api_key', key: secret }
+    records[COMPLETIONS_RECORD] = {
+      type: 'api_key',
+      key: request.secret,
+      baseUrl: request.baseUrl,
+      model: request.model
+    }
     await mkdir(dirname(this.primeAuthPath), { recursive: true })
     await writeFile(this.primeAuthPath, `${JSON.stringify(records, null, 2)}\n`, {
       encoding: 'utf8',
@@ -182,11 +215,25 @@ export class Kernel {
     const file = await this.readAuth()
     const records = file.kind === 'parsed' ? file.records : {}
     const methods = connectMethods()
-    for (const provider of PROVIDERS) {
-      const fromFile = file.kind === 'parsed' && filePresent(records, provider.id)
-      const fromEnv = envPresent(this.env, provider.env)
+    const custom = completionsRecord(records[COMPLETIONS_RECORD])
+    if (custom) {
+      return parseKernelStatus({
+        kind: 'ready',
+        model: custom.model,
+        baseUrl: custom.baseUrl,
+        methods
+      })
+    }
+    for (const shortcut of SHORTCUTS) {
+      const fromFile = file.kind === 'parsed' && filePresent(records, shortcut.id)
+      const fromEnv = envPresent(this.env, shortcut.env)
       if (fromFile || fromEnv) {
-        return parseKernelStatus({ kind: 'ready', model: provider.model, methods })
+        return parseKernelStatus({
+          kind: 'ready',
+          model: shortcut.model,
+          baseUrl: shortcut.baseUrl,
+          methods
+        })
       }
     }
     return parseKernelStatus({ kind: 'needs_login', methods })

@@ -7,22 +7,32 @@ type Props = {
   onConnect: (input?: unknown) => Promise<void>
 }
 
-function kernelLine(status: KernelStatus): string {
-  return readyForTalk(status) ? status.model : 'No model connected'
+const PRESETS = [
+  { label: 'xAI', baseUrl: 'https://api.x.ai/v1', model: 'grok-4.5' },
+  { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4.1' }
+] as const
+
+type Draft = {
+  readonly baseUrl: string
+  readonly model: string
+  readonly secret: string
 }
 
 export function SettingsPane({ status, error, onConnect }: Props): React.JSX.Element {
-  const [secrets, setSecrets] = useState<Record<string, string>>({})
+  const [draft, setDraft] = useState<Draft | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const pasteMethods = status?.methods.filter((method) => method.kind === 'paste') ?? []
   const probeMethod = status?.methods.find((method) => method.kind === 'probe')
+  const ready = status !== null && readyForTalk(status)
+  const baseUrl = draft?.baseUrl ?? (ready ? status.baseUrl : '')
+  const model = draft?.model ?? (ready ? status.model : '')
+  const secret = draft?.secret ?? ''
 
   async function runConnect(input?: unknown): Promise<void> {
     setBusy(true)
     try {
       await onConnect(input)
-      setSecrets({})
+      setDraft(null)
     } catch {
       return
     } finally {
@@ -42,9 +52,17 @@ export function SettingsPane({ status, error, onConnect }: Props): React.JSX.Ele
         <article className="max-w-xl rounded-lg border border-hairline bg-surface-1 p-6">
           <h2 className="font-display text-lg font-medium tracking-[-0.2px] text-ink">Model</h2>
           <p className="mt-2 text-sm text-ink-muted">
-            Hatch uses a subscription you already pay for. Cohort does not meter a weekly cap.
+            Hatch uses an OpenAI-compatible chat completions endpoint. Cohort does not meter a
+            weekly cap.
           </p>
-          {status ? <p className="mt-4 text-sm text-ink">{kernelLine(status)}</p> : null}
+          {ready ? (
+            <>
+              <p className="mt-4 text-sm text-ink">{status.model}</p>
+              <p className="text-sm text-ink-muted">{status.baseUrl}</p>
+            </>
+          ) : status ? (
+            <p className="mt-4 text-sm text-ink">No model connected</p>
+          ) : null}
 
           {probeMethod ? (
             <button
@@ -59,43 +77,94 @@ export function SettingsPane({ status, error, onConnect }: Props): React.JSX.Ele
             </button>
           ) : null}
 
-          <div className="mt-5 flex flex-col gap-4">
-            {pasteMethods.map((method) => (
-              <form
-                key={method.id}
-                className="flex items-end gap-2"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  void runConnect({
-                    kind: 'paste',
-                    id: method.id,
-                    secret: secrets[method.id] ?? ''
+          <div className="mt-5 flex flex-wrap gap-2">
+            {PRESETS.map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                disabled={busy}
+                className="rounded-md border border-hairline bg-surface-1 px-3.5 py-2 text-sm font-medium text-ink hover:bg-surface-2 disabled:opacity-50"
+                onClick={() => {
+                  setDraft({
+                    baseUrl: preset.baseUrl,
+                    model: preset.model,
+                    secret
                   })
                 }}
               >
-                <label className="flex min-w-0 flex-1 flex-col gap-1.5 text-sm text-ink">
-                  {method.label}
-                  <input
-                    type="password"
-                    value={secrets[method.id] ?? ''}
-                    disabled={busy}
-                    className="rounded-md border border-hairline bg-canvas px-3 py-2 text-sm text-ink"
-                    onChange={(event) => {
-                      const value = event.target.value
-                      setSecrets((prev) => ({ ...prev, [method.id]: value }))
-                    }}
-                  />
-                </label>
-                <button
-                  type="submit"
-                  disabled={busy}
-                  className="rounded-md bg-primary px-3.5 py-2 text-sm font-medium text-on-primary hover:bg-primary-hover disabled:opacity-50"
-                >
-                  Connect
-                </button>
-              </form>
+                {preset.label}
+              </button>
             ))}
           </div>
+
+          <form
+            className="mt-5 flex flex-col gap-4"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void runConnect({
+                kind: 'paste',
+                baseUrl,
+                model,
+                secret
+              })
+            }}
+          >
+            <label className="flex min-w-0 flex-col gap-1.5 text-sm text-ink">
+              Base URL
+              <input
+                type="text"
+                value={baseUrl}
+                disabled={busy}
+                className="rounded-md border border-hairline bg-canvas px-3 py-2 text-sm text-ink"
+                onChange={(event) => {
+                  setDraft({
+                    baseUrl: event.target.value,
+                    model,
+                    secret
+                  })
+                }}
+              />
+            </label>
+            <label className="flex min-w-0 flex-col gap-1.5 text-sm text-ink">
+              Model
+              <input
+                type="text"
+                value={model}
+                disabled={busy}
+                className="rounded-md border border-hairline bg-canvas px-3 py-2 text-sm text-ink"
+                onChange={(event) => {
+                  setDraft({
+                    baseUrl,
+                    model: event.target.value,
+                    secret
+                  })
+                }}
+              />
+            </label>
+            <label className="flex min-w-0 flex-col gap-1.5 text-sm text-ink">
+              API key
+              <input
+                type="password"
+                value={secret}
+                disabled={busy}
+                className="rounded-md border border-hairline bg-canvas px-3 py-2 text-sm text-ink"
+                onChange={(event) => {
+                  setDraft({
+                    baseUrl,
+                    model,
+                    secret: event.target.value
+                  })
+                }}
+              />
+            </label>
+            <button
+              type="submit"
+              disabled={busy}
+              className="self-start rounded-md bg-primary px-3.5 py-2 text-sm font-medium text-on-primary hover:bg-primary-hover disabled:opacity-50"
+            >
+              Connect
+            </button>
+          </form>
 
           {error ? (
             <p className="mt-4 text-sm text-danger" role="alert">

@@ -13,12 +13,7 @@ function tempDir(): string {
   return dir
 }
 
-const methods = [
-  { id: 'probe', label: 'Use a key already on this Mac', kind: 'probe' },
-  { id: 'xai', label: 'xAI', kind: 'paste' },
-  { id: 'openai', label: 'OpenAI', kind: 'paste' },
-  { id: 'anthropic', label: 'Anthropic', kind: 'paste' }
-]
+const methods = [{ id: 'probe', label: 'Use a key already on this Mac', kind: 'probe' }]
 
 afterEach(() => {
   for (const dir of homes.splice(0)) {
@@ -43,26 +38,37 @@ describe('Kernel', () => {
       primeAuthPath: join(tempDir(), 'auth.json')
     })
     const status = await kernel.start()
-    expect(status).toEqual({ kind: 'ready', model: 'grok-4.5', methods })
+    expect(status).toEqual({
+      kind: 'ready',
+      model: 'grok-4.5',
+      baseUrl: 'https://api.x.ai/v1',
+      methods
+    })
     expect(JSON.stringify(status).includes('"key"')).toBe(false)
     expect(JSON.parse(JSON.stringify(status))).toEqual({
       kind: 'ready',
       model: 'grok-4.5',
+      baseUrl: 'https://api.x.ai/v1',
       methods
     })
   })
 
-  it('prefers auth.json xai over env XAI_API_KEY as one source', async () => {
+  it('is ready from auth.json xai even when XAI_API_KEY is also set', async () => {
     const authPath = join(tempDir(), 'auth.json')
     writeFileSync(authPath, JSON.stringify({ xai: { type: 'api_key', key: 'sk-file' } }), 'utf8')
     const kernel = new Kernel({
       env: { XAI_API_KEY: 'sk-env' },
       primeAuthPath: authPath
     })
-    expect(await kernel.start()).toEqual({ kind: 'ready', model: 'grok-4.5', methods })
+    expect(await kernel.start()).toEqual({
+      kind: 'ready',
+      model: 'grok-4.5',
+      baseUrl: 'https://api.x.ai/v1',
+      methods
+    })
   })
 
-  it('paste xai creates 0600 auth.json, preserves a sibling openai key, and returns grok-4.5', async () => {
+  it('paste writes openai-completions, preserves a sibling openai key, and returns that model', async () => {
     const authPath = join(tempDir(), '.prime', 'agent', 'auth.json')
     mkdirSync(dirname(authPath), { recursive: true })
     writeFileSync(
@@ -71,34 +77,90 @@ describe('Kernel', () => {
       'utf8'
     )
     const kernel = new Kernel({ env: {}, primeAuthPath: authPath })
-    const status = await kernel.connect({ kind: 'paste', id: 'xai', secret: 'sk-xai' })
-    expect(status).toEqual({ kind: 'ready', model: 'grok-4.5', methods })
+    const status = await kernel.connect({
+      kind: 'paste',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      model: 'llama3.1:8b',
+      secret: 'sk'
+    })
+    expect(status).toEqual({
+      kind: 'ready',
+      model: 'llama3.1:8b',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      methods
+    })
     expect(JSON.parse(readFileSync(authPath, 'utf8'))).toEqual({
       openai: { type: 'api_key', key: 'sk-openai' },
-      xai: { type: 'api_key', key: 'sk-xai' }
+      'openai-completions': {
+        type: 'api_key',
+        key: 'sk',
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        model: 'llama3.1:8b'
+      }
     })
     expect(statSync(authPath).mode & 0o777).toBe(0o600)
   })
 
   it('throws on paste with an empty secret', async () => {
     const kernel = new Kernel({ env: {}, primeAuthPath: join(tempDir(), 'auth.json') })
-    await expect(kernel.connect({ kind: 'paste', id: 'xai', secret: '' })).rejects.toThrow()
+    await expect(
+      kernel.connect({
+        kind: 'paste',
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        model: 'llama3.1:8b',
+        secret: ''
+      })
+    ).rejects.toThrow('empty secret')
   })
 
-  it('throws unknown method for a stale paste id', async () => {
+  it('throws on paste with an empty model', async () => {
     const kernel = new Kernel({ env: {}, primeAuthPath: join(tempDir(), 'auth.json') })
-    await expect(kernel.connect({ kind: 'paste', id: 'nope', secret: 'sk' })).rejects.toThrow(
-      'unknown method'
-    )
+    await expect(
+      kernel.connect({
+        kind: 'paste',
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        model: '',
+        secret: 'sk'
+      })
+    ).rejects.toThrow('empty model')
+  })
+
+  it('throws on paste with a non-http base url', async () => {
+    const kernel = new Kernel({ env: {}, primeAuthPath: join(tempDir(), 'auth.json') })
+    await expect(
+      kernel.connect({
+        kind: 'paste',
+        baseUrl: 'ftp://x',
+        model: 'llama3.1:8b',
+        secret: 'sk'
+      })
+    ).rejects.toThrow('invalid base url')
+  })
+
+  it('throws on paste with credentials in the base url', async () => {
+    const kernel = new Kernel({ env: {}, primeAuthPath: join(tempDir(), 'auth.json') })
+    await expect(
+      kernel.connect({
+        kind: 'paste',
+        baseUrl: 'https://user:pass@host/v1',
+        model: 'llama3.1:8b',
+        secret: 'sk'
+      })
+    ).rejects.toThrow('invalid base url')
   })
 
   it('refuses paste when auth.json is not object JSON', async () => {
     const authPath = join(tempDir(), 'auth.json')
     writeFileSync(authPath, 'not-json', 'utf8')
     const kernel = new Kernel({ env: {}, primeAuthPath: authPath })
-    await expect(kernel.connect({ kind: 'paste', id: 'xai', secret: 'sk' })).rejects.toThrow(
-      'auth file unreadable'
-    )
+    await expect(
+      kernel.connect({
+        kind: 'paste',
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        model: 'llama3.1:8b',
+        secret: 'sk'
+      })
+    ).rejects.toThrow('auth file unreadable')
     expect(readFileSync(authPath, 'utf8')).toBe('not-json')
   })
 
@@ -114,22 +176,34 @@ describe('Kernel', () => {
     const authPath = join(tempDir(), 'auth.json')
     writeFileSync(authPath, JSON.stringify({ xai: { type: 'api_key', key: 'sk-file' } }), 'utf8')
     const kernel = new Kernel({ env: {}, primeAuthPath: authPath })
-    expect(await kernel.start()).toEqual({ kind: 'ready', model: 'grok-4.5', methods })
+    expect(await kernel.start()).toEqual({
+      kind: 'ready',
+      model: 'grok-4.5',
+      baseUrl: 'https://api.x.ai/v1',
+      methods
+    })
     await kernel.stop()
     expect(JSON.parse(readFileSync(authPath, 'utf8'))).toEqual({
       xai: { type: 'api_key', key: 'sk-file' }
     })
-    expect(await kernel.start()).toEqual({ kind: 'ready', model: 'grok-4.5', methods })
+    expect(await kernel.start()).toEqual({
+      kind: 'ready',
+      model: 'grok-4.5',
+      baseUrl: 'https://api.x.ai/v1',
+      methods
+    })
   })
 })
 
 describe('parseKernelStatus', () => {
-  it('rejects ready with empty methods and a smuggled key', () => {
-    expect(() => parseKernelStatus({ kind: 'ready', model: 'x', methods: [], key: 'sk' })).toThrow()
+  it('rejects ready without baseUrl', () => {
+    expect(() => parseKernelStatus({ kind: 'ready', model: 'x', methods })).toThrow()
   })
 
   it('rejects ready without methods', () => {
-    expect(() => parseKernelStatus({ kind: 'ready', model: 'x' })).toThrow()
+    expect(() =>
+      parseKernelStatus({ kind: 'ready', model: 'x', baseUrl: 'https://api.x.ai/v1' })
+    ).toThrow()
   })
 
   it('rejects a connected payload that smuggles apiKey', () => {
@@ -137,6 +211,7 @@ describe('parseKernelStatus', () => {
       parseKernelStatus({
         kind: 'ready',
         model: 'grok-4.5',
+        baseUrl: 'https://api.x.ai/v1',
         methods,
         apiKey: 'sk'
       })

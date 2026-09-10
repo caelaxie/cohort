@@ -8,7 +8,12 @@ export type ConnectMethod = {
 
 export type KernelStatus =
   | { readonly kind: 'needs_login'; readonly methods: readonly ConnectMethod[] }
-  | { readonly kind: 'ready'; readonly model: string; readonly methods: readonly ConnectMethod[] }
+  | {
+      readonly kind: 'ready'
+      readonly model: string
+      readonly baseUrl: string
+      readonly methods: readonly ConnectMethod[]
+    }
 
 const SECRET_FIELDS = ['key', 'apiKey', 'token', 'secret', 'access', 'password'] as const
 
@@ -70,7 +75,15 @@ export function parseKernelStatus(value: unknown): KernelStatus {
     if (typeof value.model !== 'string' || value.model.length === 0) {
       throw new Error('missing model')
     }
-    return { kind: 'ready', model: value.model, methods: parseMethods(value.methods) }
+    if (typeof value.baseUrl !== 'string' || value.baseUrl.length === 0) {
+      throw new Error('missing base url')
+    }
+    return {
+      kind: 'ready',
+      model: value.model,
+      baseUrl: value.baseUrl,
+      methods: parseMethods(value.methods)
+    }
   }
   throw new Error('unknown kind')
 }
