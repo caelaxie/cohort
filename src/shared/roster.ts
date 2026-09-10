@@ -54,7 +54,7 @@ export function hatchOnlyRoster(): Roster {
   return { hatch: HATCH, others: [], current: HATCH_ID }
 }
 
-export function rosterBots(roster: Roster): readonly Bot[] {
+export function rosterBots(roster: Roster): readonly [Hatch, ...Teammate[]] {
   return [roster.hatch, ...roster.others]
 }
 

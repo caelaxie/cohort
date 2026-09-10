@@ -57,8 +57,9 @@ export class RosterStore {
       .all()
     const others: Teammate[] = []
     for (const row of rows) {
-      if (row.id === HATCH_ID) continue
-      others.push({ id: parseBotId(row.id) as Teammate['id'], name: row.name })
+      const id = parseBotId(row.id)
+      if (id === HATCH_ID) continue
+      others.push({ id, name: row.name })
     }
     return others
   }

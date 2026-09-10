@@ -29,6 +29,7 @@ function App(): React.JSX.Element {
         roster={view.roster}
         error={view.error}
         onSelect={(id) => {
+          if (id === view.roster.current) return
           void window.cohort
             .select(id)
             .then((raw) => setView(viewWith(parseHome(raw))))

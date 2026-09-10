@@ -14,7 +14,7 @@ export function BotSidebar({ roster, error, onSelect }: Props): React.JSX.Elemen
         <p className="font-display text-sm font-medium tracking-[-0.05px] text-ink">Cohort</p>
       </div>
 
-      <div className="flex items-center justify-between px-3 pb-2">
+      <div className="flex items-center px-3 pb-2">
         <h2 className="text-[13px] font-medium tracking-[0.4px] text-ink-subtle">Crew</h2>
       </div>
 
