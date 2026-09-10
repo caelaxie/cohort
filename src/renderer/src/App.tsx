@@ -42,6 +42,25 @@ function App(): React.JSX.Element {
       })
   }, [])
 
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if (event.key !== ',') return
+      if (!(event.metaKey || event.ctrlKey)) return
+      if (event.altKey || event.shiftKey) return
+      event.preventDefault()
+      setScreen('settings')
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  useEffect(() => {
+    if (!window.cohort) return
+    return window.cohort.onOpenSettings(() => {
+      setScreen('settings')
+    })
+  }, [])
+
   return (
     <div className="flex h-full min-h-0 bg-canvas text-ink">
       <BotSidebar

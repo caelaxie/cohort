@@ -1,6 +1,6 @@
 import { tmpdir } from 'node:os'
 import { join } from 'path'
-import { app, shell, BrowserWindow } from 'electron'
+import { app, shell, BrowserWindow, Menu } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { registerIpc } from './ipc'
@@ -12,6 +12,34 @@ if (process.env.COHORT_HOME) {
 }
 
 let shutdown: (() => Promise<void>) | null = null
+
+function openSettingsWindow(): void {
+  const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  window?.webContents.send('cohort:open-settings')
+}
+
+function installMenu(): void {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      {
+        label: app.name,
+        submenu: [
+          { role: 'about' },
+          { type: 'separator' },
+          {
+            label: 'Settings...',
+            accelerator: 'CommandOrControl+,',
+            click: openSettingsWindow
+          },
+          { type: 'separator' },
+          { role: 'quit' }
+        ]
+      },
+      { role: 'editMenu' },
+      { role: 'windowMenu' }
+    ])
+  )
+}
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -66,6 +94,7 @@ if (!gotLock) {
 
     const session = registerIpc()
     shutdown = session.quit
+    installMenu()
     createWindow()
 
     app.on('activate', () => {

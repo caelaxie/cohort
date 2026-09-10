@@ -25,6 +25,7 @@ export type CohortApi = {
   select: (id: string) => Promise<unknown>
   kernel: () => Promise<unknown>
   connect: (input?: unknown) => Promise<unknown>
+  onOpenSettings: (callback: () => void) => () => void
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
