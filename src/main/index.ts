@@ -38,17 +38,19 @@ function createWindow(): void {
   }
 }
 
-const gotLock = app.requestSingleInstanceLock()
+const gotLock = is.dev ? true : app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
 } else {
-  app.on('second-instance', () => {
-    const [window] = BrowserWindow.getAllWindows()
-    if (window) {
-      if (window.isMinimized()) window.restore()
-      window.focus()
-    }
-  })
+  if (!is.dev) {
+    app.on('second-instance', () => {
+      const [window] = BrowserWindow.getAllWindows()
+      if (window) {
+        if (window.isMinimized()) window.restore()
+        window.focus()
+      }
+    })
+  }
 
   app.whenReady().then(() => {
     electronApp.setAppUserModelId('app.cohort.desktop')
