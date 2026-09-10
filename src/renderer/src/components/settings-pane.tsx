@@ -1,16 +1,11 @@
 import { useState } from 'react'
-import { readyForTalk, type KernelStatus } from '../../../shared/kernel'
+import { ENDPOINT_PRESETS, readyForTalk, type KernelStatus } from '../../../shared/kernel'
 
 type Props = {
-  status: KernelStatus | null
+  status: KernelStatus
   error: string | null
   onConnect: (input?: unknown) => Promise<void>
 }
-
-const PRESETS = [
-  { label: 'xAI', baseUrl: 'https://api.x.ai/v1', model: 'grok-4.5' },
-  { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4.1' }
-] as const
 
 type Draft = {
   readonly baseUrl: string
@@ -22,8 +17,7 @@ export function SettingsPane({ status, error, onConnect }: Props): React.JSX.Ele
   const [draft, setDraft] = useState<Draft | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const probeMethod = status?.methods.find((method) => method.kind === 'probe')
-  const ready = status !== null && readyForTalk(status)
+  const ready = readyForTalk(status)
   const baseUrl = draft?.baseUrl ?? (ready ? status.baseUrl : '')
   const model = draft?.model ?? (ready ? status.model : '')
   const secret = draft?.secret ?? ''
@@ -60,25 +54,23 @@ export function SettingsPane({ status, error, onConnect }: Props): React.JSX.Ele
               <p className="mt-4 text-sm text-ink">{status.model}</p>
               <p className="text-sm text-ink-muted">{status.baseUrl}</p>
             </>
-          ) : status ? (
+          ) : (
             <p className="mt-4 text-sm text-ink">No model connected</p>
-          ) : null}
+          )}
 
-          {probeMethod ? (
-            <button
-              type="button"
-              disabled={busy}
-              className="mt-5 rounded-md border border-hairline bg-surface-1 px-3.5 py-2 text-sm font-medium text-ink hover:bg-surface-2 disabled:opacity-50"
-              onClick={() => {
-                void runConnect({ kind: 'probe' })
-              }}
-            >
-              {probeMethod.label}
-            </button>
-          ) : null}
+          <button
+            type="button"
+            disabled={busy}
+            className="mt-5 rounded-md border border-hairline bg-surface-1 px-3.5 py-2 text-sm font-medium text-ink hover:bg-surface-2 disabled:opacity-50"
+            onClick={() => {
+              void runConnect({ kind: 'probe' })
+            }}
+          >
+            Use a key already on this Mac
+          </button>
 
           <div className="mt-5 flex flex-wrap gap-2">
-            {PRESETS.map((preset) => (
+            {ENDPOINT_PRESETS.map((preset) => (
               <button
                 key={preset.label}
                 type="button"

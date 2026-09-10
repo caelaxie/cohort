@@ -13,8 +13,6 @@ function tempDir(): string {
   return dir
 }
 
-const methods = [{ id: 'probe', label: 'Use a key already on this Mac', kind: 'probe' }]
-
 afterEach(() => {
   for (const dir of homes.splice(0)) {
     rmSync(dir, { recursive: true, force: true })
@@ -22,14 +20,10 @@ afterEach(() => {
 })
 
 describe('Kernel', () => {
-  it('needs_login when no file and no env, and start twice is the same promise', async () => {
-    const authPath = join(tempDir(), 'auth.json')
-    const kernel = new Kernel({ env: {}, primeAuthPath: authPath })
-    const first = kernel.start()
-    const second = kernel.start()
-    expect(second).toBe(first)
-    expect(await first).toEqual({ kind: 'needs_login', methods })
-    expect(await second).toEqual({ kind: 'needs_login', methods })
+  it('needs_login when no file and no env', async () => {
+    const kernel = new Kernel({ env: {}, primeAuthPath: join(tempDir(), 'auth.json') })
+    expect(await kernel.status()).toEqual({ kind: 'needs_login' })
+    expect(await kernel.status()).toEqual({ kind: 'needs_login' })
   })
 
   it('is ready with grok-4.5 from XAI_API_KEY and the payload JSON has no key', async () => {
@@ -37,20 +31,13 @@ describe('Kernel', () => {
       env: { XAI_API_KEY: 'sk-env' },
       primeAuthPath: join(tempDir(), 'auth.json')
     })
-    const status = await kernel.start()
+    const status = await kernel.status()
     expect(status).toEqual({
       kind: 'ready',
       model: 'grok-4.5',
-      baseUrl: 'https://api.x.ai/v1',
-      methods
+      baseUrl: 'https://api.x.ai/v1'
     })
     expect(JSON.stringify(status).includes('"key"')).toBe(false)
-    expect(JSON.parse(JSON.stringify(status))).toEqual({
-      kind: 'ready',
-      model: 'grok-4.5',
-      baseUrl: 'https://api.x.ai/v1',
-      methods
-    })
   })
 
   it('is ready from auth.json xai even when XAI_API_KEY is also set', async () => {
@@ -60,11 +47,10 @@ describe('Kernel', () => {
       env: { XAI_API_KEY: 'sk-env' },
       primeAuthPath: authPath
     })
-    expect(await kernel.start()).toEqual({
+    expect(await kernel.status()).toEqual({
       kind: 'ready',
       model: 'grok-4.5',
-      baseUrl: 'https://api.x.ai/v1',
-      methods
+      baseUrl: 'https://api.x.ai/v1'
     })
   })
 
@@ -86,8 +72,7 @@ describe('Kernel', () => {
     expect(status).toEqual({
       kind: 'ready',
       model: 'llama3.1:8b',
-      baseUrl: 'http://127.0.0.1:11434/v1',
-      methods
+      baseUrl: 'http://127.0.0.1:11434/v1'
     })
     expect(JSON.parse(readFileSync(authPath, 'utf8'))).toEqual({
       openai: { type: 'api_key', key: 'sk-openai' },
@@ -164,46 +149,39 @@ describe('Kernel', () => {
     expect(readFileSync(authPath, 'utf8')).toBe('not-json')
   })
 
-  it('start twice does not rewrite a missing file', async () => {
+  it('status does not create a missing file', async () => {
     const authPath = join(tempDir(), 'auth.json')
     const kernel = new Kernel({ env: {}, primeAuthPath: authPath })
-    await kernel.start()
-    await kernel.start()
+    await kernel.status()
+    await kernel.status()
     expect(() => statSync(authPath)).toThrow()
   })
 
-  it('stop does not delete auth.json and start after stop can still be ready', async () => {
+  it('connect does not delete a sibling xai key', async () => {
     const authPath = join(tempDir(), 'auth.json')
     writeFileSync(authPath, JSON.stringify({ xai: { type: 'api_key', key: 'sk-file' } }), 'utf8')
     const kernel = new Kernel({ env: {}, primeAuthPath: authPath })
-    expect(await kernel.start()).toEqual({
+    expect(await kernel.status()).toEqual({
       kind: 'ready',
       model: 'grok-4.5',
-      baseUrl: 'https://api.x.ai/v1',
-      methods
+      baseUrl: 'https://api.x.ai/v1'
     })
-    await kernel.stop()
-    expect(JSON.parse(readFileSync(authPath, 'utf8'))).toEqual({
-      xai: { type: 'api_key', key: 'sk-file' }
+    await kernel.connect({
+      kind: 'paste',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      model: 'llama3.1:8b',
+      secret: 'sk'
     })
-    expect(await kernel.start()).toEqual({
-      kind: 'ready',
-      model: 'grok-4.5',
-      baseUrl: 'https://api.x.ai/v1',
-      methods
+    expect(JSON.parse(readFileSync(authPath, 'utf8')).xai).toEqual({
+      type: 'api_key',
+      key: 'sk-file'
     })
   })
 })
 
 describe('parseKernelStatus', () => {
   it('rejects ready without baseUrl', () => {
-    expect(() => parseKernelStatus({ kind: 'ready', model: 'x', methods })).toThrow()
-  })
-
-  it('rejects ready without methods', () => {
-    expect(() =>
-      parseKernelStatus({ kind: 'ready', model: 'x', baseUrl: 'https://api.x.ai/v1' })
-    ).toThrow()
+    expect(() => parseKernelStatus({ kind: 'ready', model: 'x' })).toThrow()
   })
 
   it('rejects a connected payload that smuggles apiKey', () => {
@@ -212,7 +190,6 @@ describe('parseKernelStatus', () => {
         kind: 'ready',
         model: 'grok-4.5',
         baseUrl: 'https://api.x.ai/v1',
-        methods,
         apiKey: 'sk'
       })
     ).toThrow()

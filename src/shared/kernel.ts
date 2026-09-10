@@ -1,19 +1,23 @@
-export type ConnectMethodId = string & { readonly __brand: 'ConnectMethodId' }
-
-export type ConnectMethod = {
-  readonly id: ConnectMethodId
-  readonly label: string
-  readonly kind: 'paste' | 'probe'
-}
-
 export type KernelStatus =
-  | { readonly kind: 'needs_login'; readonly methods: readonly ConnectMethod[] }
-  | {
-      readonly kind: 'ready'
-      readonly model: string
-      readonly baseUrl: string
-      readonly methods: readonly ConnectMethod[]
-    }
+  | { readonly kind: 'needs_login' }
+  | { readonly kind: 'ready'; readonly model: string; readonly baseUrl: string }
+
+export const ENDPOINT_PRESETS = [
+  {
+    label: 'xAI',
+    fileKey: 'xai',
+    env: 'XAI_API_KEY',
+    baseUrl: 'https://api.x.ai/v1',
+    model: 'grok-4.5'
+  },
+  {
+    label: 'OpenAI',
+    fileKey: 'openai',
+    env: 'OPENAI_API_KEY',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4.1'
+  }
+] as const
 
 const SECRET_FIELDS = ['key', 'apiKey', 'token', 'secret', 'access', 'password'] as const
 
@@ -27,49 +31,17 @@ export function readyForTalk(
   return status.kind === 'ready'
 }
 
-export function parseConnectMethodId(value: unknown): ConnectMethodId {
-  if (typeof value !== 'string' || value.length === 0) {
-    throw new Error('invalid method id')
-  }
-  return value as ConnectMethodId
-}
-
-function parseConnectMethod(value: unknown): ConnectMethod {
+export function parseKernelStatus(value: unknown): KernelStatus {
   if (!isRecord(value)) {
-    throw new Error('invalid method')
+    throw new Error('invalid kernel status')
   }
-  const id = parseConnectMethodId(value.id)
-  if (typeof value.label !== 'string' || value.label.length === 0) {
-    throw new Error('invalid method')
-  }
-  if (value.kind !== 'paste' && value.kind !== 'probe') {
-    throw new Error('invalid method')
-  }
-  return { id, label: value.label, kind: value.kind }
-}
-
-function parseMethods(value: unknown): readonly ConnectMethod[] {
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new Error('missing methods')
-  }
-  return value.map(parseConnectMethod)
-}
-
-function assertNoSecretFields(value: Record<string, unknown>): void {
   for (const field of SECRET_FIELDS) {
     if (field in value) {
       throw new Error('secret field')
     }
   }
-}
-
-export function parseKernelStatus(value: unknown): KernelStatus {
-  if (!isRecord(value)) {
-    throw new Error('invalid kernel status')
-  }
-  assertNoSecretFields(value)
   if (value.kind === 'needs_login') {
-    return { kind: 'needs_login', methods: parseMethods(value.methods) }
+    return { kind: 'needs_login' }
   }
   if (value.kind === 'ready') {
     if (typeof value.model !== 'string' || value.model.length === 0) {
@@ -78,12 +50,7 @@ export function parseKernelStatus(value: unknown): KernelStatus {
     if (typeof value.baseUrl !== 'string' || value.baseUrl.length === 0) {
       throw new Error('missing base url')
     }
-    return {
-      kind: 'ready',
-      model: value.model,
-      baseUrl: value.baseUrl,
-      methods: parseMethods(value.methods)
-    }
+    return { kind: 'ready', model: value.model, baseUrl: value.baseUrl }
   }
   throw new Error('unknown kind')
 }

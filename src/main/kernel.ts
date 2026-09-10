@@ -1,12 +1,6 @@
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import {
-  parseConnectMethodId,
-  parseKernelStatus,
-  readyForTalk as statusReadyForTalk,
-  type ConnectMethod,
-  type KernelStatus
-} from '../shared/kernel'
+import { ENDPOINT_PRESETS, type KernelStatus } from '../shared/kernel'
 
 export type KernelOptions = {
   readonly env: NodeJS.Dict<string>
@@ -14,18 +8,6 @@ export type KernelOptions = {
 }
 
 const COMPLETIONS_RECORD = 'openai-completions'
-
-type Shortcut = {
-  readonly id: 'xai' | 'openai'
-  readonly env: string
-  readonly model: string
-  readonly baseUrl: string
-}
-
-const SHORTCUTS: readonly Shortcut[] = [
-  { id: 'xai', env: 'XAI_API_KEY', model: 'grok-4.5', baseUrl: 'https://api.x.ai/v1' },
-  { id: 'openai', env: 'OPENAI_API_KEY', model: 'gpt-4.1', baseUrl: 'https://api.openai.com/v1' }
-]
 
 type ConnectRequest =
   | { readonly kind: 'probe' }
@@ -49,16 +31,6 @@ function isNotFound(reason: unknown): boolean {
   return (
     typeof reason === 'object' && reason !== null && 'code' in reason && reason.code === 'ENOENT'
   )
-}
-
-function connectMethods(): readonly ConnectMethod[] {
-  return [
-    {
-      id: parseConnectMethodId('probe'),
-      label: 'Use a key already on this Mac',
-      kind: 'probe'
-    }
-  ]
 }
 
 function parseBaseUrl(value: unknown): string {
@@ -112,8 +84,8 @@ function envPresent(env: NodeJS.Dict<string>, name: string): boolean {
   return typeof value === 'string' && value.trim().length > 0
 }
 
-function filePresent(records: Record<string, unknown>, providerId: string): boolean {
-  const entry = records[providerId]
+function fileKeyPresent(records: Record<string, unknown>, fileKey: string): boolean {
+  const entry = records[fileKey]
   if (!isRecord(entry) || entry.type !== 'api_key' || typeof entry.key !== 'string') {
     return false
   }
@@ -136,58 +108,26 @@ function completionsRecord(
   }
 }
 
+function ready(model: string, baseUrl: string): KernelStatus {
+  return { kind: 'ready', model, baseUrl }
+}
+
 export class Kernel {
   private readonly env: NodeJS.Dict<string>
   private readonly primeAuthPath: string
-  private startGate: Promise<KernelStatus> | null = null
-  private current: KernelStatus | undefined
 
   constructor(options: KernelOptions) {
     this.env = options.env
     this.primeAuthPath = options.primeAuthPath
   }
 
-  start(): Promise<KernelStatus> {
-    if (this.startGate) {
-      return this.startGate
-    }
-    this.startGate = this.probe().then((status) => {
-      this.current = status
-      return status
-    })
-    return this.startGate
-  }
-
-  async stop(): Promise<void> {
-    if (this.startGate) {
-      await this.startGate.catch(() => undefined)
-    }
-    this.startGate = null
-    this.current = undefined
-  }
-
-  status(): KernelStatus {
-    if (this.current === undefined) {
-      throw new Error('kernel not started')
-    }
-    return this.current
-  }
-
-  readyForTalk(): boolean {
-    return statusReadyForTalk(this.status())
+  status(): Promise<KernelStatus> {
+    return this.probe()
   }
 
   async connect(input?: unknown): Promise<KernelStatus> {
-    if (this.startGate) {
-      await this.startGate.catch(() => {
-        this.startGate = null
-      })
-    }
     const request = parseConnectRequest(input)
-    const status = request.kind === 'probe' ? await this.probe() : await this.paste(request)
-    this.current = status
-    this.startGate = Promise.resolve(status)
-    return status
+    return request.kind === 'probe' ? this.probe() : this.paste(request)
   }
 
   private async paste(request: Extract<ConnectRequest, { kind: 'paste' }>): Promise<KernelStatus> {
@@ -214,29 +154,17 @@ export class Kernel {
   private async probe(): Promise<KernelStatus> {
     const file = await this.readAuth()
     const records = file.kind === 'parsed' ? file.records : {}
-    const methods = connectMethods()
     const custom = completionsRecord(records[COMPLETIONS_RECORD])
     if (custom) {
-      return parseKernelStatus({
-        kind: 'ready',
-        model: custom.model,
-        baseUrl: custom.baseUrl,
-        methods
-      })
+      return ready(custom.model, custom.baseUrl)
     }
-    for (const shortcut of SHORTCUTS) {
-      const fromFile = file.kind === 'parsed' && filePresent(records, shortcut.id)
-      const fromEnv = envPresent(this.env, shortcut.env)
-      if (fromFile || fromEnv) {
-        return parseKernelStatus({
-          kind: 'ready',
-          model: shortcut.model,
-          baseUrl: shortcut.baseUrl,
-          methods
-        })
+    for (const preset of ENDPOINT_PRESETS) {
+      const fromFile = file.kind === 'parsed' && fileKeyPresent(records, preset.fileKey)
+      if (fromFile || envPresent(this.env, preset.env)) {
+        return ready(preset.model, preset.baseUrl)
       }
     }
-    return parseKernelStatus({ kind: 'needs_login', methods })
+    return { kind: 'needs_login' }
   }
 
   private async readAuth(): Promise<AuthFile> {

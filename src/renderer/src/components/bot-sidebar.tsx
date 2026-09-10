@@ -2,26 +2,23 @@ import { cn } from '@/lib/utils'
 import { rosterBots, type Roster } from '../../../shared/roster'
 import { readyForTalk, type KernelStatus } from '../../../shared/kernel'
 
-export type Screen = 'crew' | 'settings'
-
 type Props = {
   roster: Roster
   error: string | null
   onSelect: (id: string) => void
-  screen: Screen
-  kernelStatus: KernelStatus | null
+  settingsOpen: boolean
+  kernelStatus: KernelStatus
   onOpenSettings: () => void
 }
 
-function kernelLine(status: KernelStatus): string {
-  return readyForTalk(status) ? status.model : 'No model connected'
-}
+const navButtonClass =
+  'flex min-h-8 w-full items-center rounded-md px-2 py-1.5 text-left text-sm text-ink-muted transition-[background-color,color] duration-150 ease-out hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color-mix(in_srgb,var(--color-primary-focus)_50%,transparent)]'
 
 export function BotSidebar({
   roster,
   error,
   onSelect,
-  screen,
+  settingsOpen,
   kernelStatus,
   onOpenSettings
 }: Props): React.JSX.Element {
@@ -42,46 +39,35 @@ export function BotSidebar({
       ) : null}
 
       <ul className="flex flex-1 flex-col gap-0.5 overflow-auto px-2 pb-3">
-        {rosterBots(roster).map((bot) => (
-          <li key={bot.id}>
-            <button
-              type="button"
-              aria-current={screen === 'crew' && bot.id === roster.current ? 'page' : undefined}
-              className={cn(
-                'flex min-h-8 w-full items-center rounded-md px-2 py-1.5 text-left text-sm text-ink-muted',
-                'transition-[background-color,color] duration-150 ease-out',
-                'hover:bg-surface-2 hover:text-ink',
-                'focus-visible:outline-2 focus-visible:outline-offset-2',
-                'focus-visible:outline-[color-mix(in_srgb,var(--color-primary-focus)_50%,transparent)]',
-                screen === 'crew' && bot.id === roster.current && 'bg-surface-2 text-ink'
-              )}
-              onClick={() => onSelect(bot.id)}
-            >
-              <span className="truncate">{bot.name}</span>
-            </button>
-          </li>
-        ))}
+        {rosterBots(roster).map((bot) => {
+          const current = !settingsOpen && bot.id === roster.current
+          return (
+            <li key={bot.id}>
+              <button
+                type="button"
+                aria-current={current ? 'page' : undefined}
+                className={cn(navButtonClass, current && 'bg-surface-2 text-ink')}
+                onClick={() => onSelect(bot.id)}
+              >
+                <span className="truncate">{bot.name}</span>
+              </button>
+            </li>
+          )
+        })}
       </ul>
 
       <div className="shrink-0 border-t border-hairline px-2 py-3">
         <button
           type="button"
-          aria-current={screen === 'settings' ? 'page' : undefined}
-          className={cn(
-            'flex min-h-8 w-full items-center rounded-md px-2 py-1.5 text-left text-sm text-ink-muted',
-            'transition-[background-color,color] duration-150 ease-out',
-            'hover:bg-surface-2 hover:text-ink',
-            'focus-visible:outline-2 focus-visible:outline-offset-2',
-            'focus-visible:outline-[color-mix(in_srgb,var(--color-primary-focus)_50%,transparent)]',
-            screen === 'settings' && 'bg-surface-2 text-ink'
-          )}
+          aria-current={settingsOpen ? 'page' : undefined}
+          className={cn(navButtonClass, settingsOpen && 'bg-surface-2 text-ink')}
           onClick={onOpenSettings}
         >
           Settings
         </button>
-        {kernelStatus ? (
-          <p className="px-2 pt-1 text-xs text-ink-subtle">{kernelLine(kernelStatus)}</p>
-        ) : null}
+        <p className="px-2 pt-1 text-xs text-ink-subtle">
+          {readyForTalk(kernelStatus) ? kernelStatus.model : 'No model connected'}
+        </p>
       </div>
     </aside>
   )

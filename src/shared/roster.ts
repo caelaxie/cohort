@@ -20,14 +20,6 @@ export type HomeView = {
   readonly error: string | null
 }
 
-export type CohortApi = {
-  home: () => Promise<unknown>
-  select: (id: string) => Promise<unknown>
-  kernel: () => Promise<unknown>
-  connect: (input?: unknown) => Promise<unknown>
-  onOpenSettings: (callback: () => void) => () => void
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

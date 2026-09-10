@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BotSidebar, type Screen } from '@/components/bot-sidebar'
+import { BotSidebar } from '@/components/bot-sidebar'
 import { BotMain } from '@/components/bot-main'
 import { SettingsPane } from '@/components/settings-pane'
 import { parseKernelStatus, type KernelStatus } from '../../shared/kernel'
@@ -15,8 +15,8 @@ function App(): React.JSX.Element {
       ? viewWith(hatchOnlyRoster())
       : viewWith(hatchOnlyRoster(), 'The app bridge is missing. Restart Cohort.')
   )
-  const [screen, setScreen] = useState<Screen>('crew')
-  const [kernelStatus, setKernelStatus] = useState<KernelStatus | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [kernelStatus, setKernelStatus] = useState<KernelStatus>({ kind: 'needs_login' })
   const [kernelError, setKernelError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -27,10 +27,6 @@ function App(): React.JSX.Element {
       .catch((reason: unknown) => {
         setView((prev) => viewWith(prev.roster, fail(reason, 'Could not load bots')))
       })
-  }, [])
-
-  useEffect(() => {
-    if (!window.cohort) return
     void window.cohort
       .kernel()
       .then((raw) => {
@@ -48,7 +44,7 @@ function App(): React.JSX.Element {
       if (!(event.metaKey || event.ctrlKey)) return
       if (event.altKey || event.shiftKey) return
       event.preventDefault()
-      setScreen('settings')
+      setSettingsOpen(true)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -57,7 +53,7 @@ function App(): React.JSX.Element {
   useEffect(() => {
     if (!window.cohort) return
     return window.cohort.onOpenSettings(() => {
-      setScreen('settings')
+      setSettingsOpen(true)
     })
   }, [])
 
@@ -66,13 +62,13 @@ function App(): React.JSX.Element {
       <BotSidebar
         roster={view.roster}
         error={view.error}
-        screen={screen}
+        settingsOpen={settingsOpen}
         kernelStatus={kernelStatus}
         onOpenSettings={() => {
-          setScreen('settings')
+          setSettingsOpen(true)
         }}
         onSelect={(id) => {
-          setScreen('crew')
+          setSettingsOpen(false)
           void window.cohort
             .select(id)
             .then((raw) => setView(viewWith(parseRoster(raw))))
@@ -81,7 +77,7 @@ function App(): React.JSX.Element {
             })
         }}
       />
-      {screen === 'settings' ? (
+      {settingsOpen ? (
         <SettingsPane
           status={kernelStatus}
           error={kernelError}
