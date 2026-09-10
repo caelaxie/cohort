@@ -26,7 +26,6 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
-    "@boxlite-ai/boxlite": "^0.9.7",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "better-sqlite3": "^13.0.3",

@@ -97,6 +97,73 @@ describe('RosterStore', () => {
     expect(dataVersion(home)).toBe(before)
     store.close()
   })
+
+  it('ignores leftover current_uuid and writes current_id on load', () => {
+    const home = tempHome()
+    const db = new Database(stateDbPath(home))
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS teammates (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS meta (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      );
+    `)
+    db.prepare(`INSERT INTO meta (key, value) VALUES ('current_uuid', ?)`).run(
+      '11111111-1111-4111-8111-111111111111'
+    )
+    db.close()
+
+    const store = new RosterStore(home)
+    expect(store.load()).toEqual(hatchHome())
+    store.close()
+
+    const check = new Database(stateDbPath(home), { readonly: true, fileMustExist: true })
+    try {
+      const rows = check.prepare(`SELECT key, value FROM meta ORDER BY key`).all() as {
+        key: string
+        value: string
+      }[]
+      expect(rows).toEqual([
+        { key: 'current_id', value: 'hatch' },
+        { key: 'current_uuid', value: '11111111-1111-4111-8111-111111111111' }
+      ])
+    } finally {
+      check.close()
+    }
+  })
+
+  it('unknown select throws and does not write current_id', () => {
+    const home = tempHome()
+    const db = new Database(stateDbPath(home))
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS teammates (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS meta (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      );
+    `)
+    db.prepare(`INSERT INTO meta (key, value) VALUES ('current_id', ?)`).run('ghost')
+    db.close()
+
+    const store = new RosterStore(home)
+    expect(() => store.select('nope')).toThrow('unknown bot')
+    store.close()
+
+    const check = new Database(stateDbPath(home), { readonly: true, fileMustExist: true })
+    try {
+      expect(check.prepare(`SELECT value FROM meta WHERE key = 'current_id'`).get()).toEqual({
+        value: 'ghost'
+      })
+    } finally {
+      check.close()
+    }
+  })
 })
 
 describe('parseHome', () => {
@@ -117,5 +184,21 @@ describe('parseHome', () => {
         workspaces: []
       })
     ).toThrow('leftover workspace fields')
+  })
+
+  it('throws on hatch in others and on a non-empty thread', () => {
+    const hatch = { id: 'hatch', name: 'Hatch' }
+    expect(() =>
+      parseHome({
+        roster: { hatch, others: [hatch], current: 'hatch' },
+        thread: { bot: hatch, messages: [] }
+      })
+    ).toThrow('hatch in others')
+    expect(() =>
+      parseHome({
+        roster: { hatch, others: [], current: 'hatch' },
+        thread: { bot: hatch, messages: [{ body: 'hi' }] }
+      })
+    ).toThrow('non-empty messages')
   })
 })

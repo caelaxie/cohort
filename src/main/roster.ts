@@ -4,7 +4,6 @@ import {
   HATCH_ID,
   homeFromRoster,
   parseBotId,
-  rosterBots,
   type BotId,
   type Home,
   type Teammate
@@ -38,15 +37,16 @@ export class RosterStore {
 
   select(id: string): Home {
     const botId = parseBotId(id)
-    const home = this.load()
-    if (home.roster.current === botId) {
-      return home
-    }
-    if (!rosterBots(home.roster).some((bot) => bot.id === botId)) {
+    const others = this.readOthers()
+    const known = new Set<string>([HATCH_ID, ...others.map((item) => item.id)])
+    if (!known.has(botId)) {
       throw new Error('unknown bot')
     }
-    this.writeCurrent(botId)
-    return this.load()
+    const stored = this.readCurrentId()
+    if (stored !== botId) {
+      this.writeCurrent(botId)
+    }
+    return homeFromRoster({ hatch: HATCH, others, current: botId })
   }
 
   private readOthers(): Teammate[] {

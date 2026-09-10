@@ -20,7 +20,15 @@ function App(): React.JSX.Element {
           viewWith(prev.roster, reason instanceof Error ? reason.message : 'Could not load bots')
         )
       })
-    return window.cohort.onState((raw) => setView(viewWith(parseHome(raw))))
+    return window.cohort.onState((raw) => {
+      try {
+        setView(viewWith(parseHome(raw)))
+      } catch (reason: unknown) {
+        setView((prev) =>
+          viewWith(prev.roster, reason instanceof Error ? reason.message : 'Could not load bots')
+        )
+      }
+    })
   }, [])
 
   return (
@@ -29,7 +37,6 @@ function App(): React.JSX.Element {
         roster={view.roster}
         error={view.error}
         onSelect={(id) => {
-          if (id === view.roster.current) return
           void window.cohort
             .select(id)
             .then((raw) => setView(viewWith(parseHome(raw))))
