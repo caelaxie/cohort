@@ -51,10 +51,15 @@ async function pageTarget(port) {
     const res = await fetch(`http://127.0.0.1:${port}/json/list`)
     targets = await res.json()
   } catch {
-    fail(`no CDP endpoint on 127.0.0.1:${port} — is the app running with REMOTE_DEBUGGING_PORT=${port}?`)
+    fail(
+      `no CDP endpoint on 127.0.0.1:${port} — is the app running with REMOTE_DEBUGGING_PORT=${port}?`
+    )
   }
   const page = targets.find((t) => t.type === 'page')
-  if (!page) fail(`no page target on port ${port} (saw: ${targets.map((t) => t.type).join(', ') || 'nothing'})`)
+  if (!page)
+    fail(
+      `no page target on port ${port} (saw: ${targets.map((t) => t.type).join(', ') || 'nothing'})`
+    )
   return page
 }
 
@@ -77,7 +82,9 @@ class Cdp {
   open() {
     return new Promise((resolve, reject) => {
       this.ws.addEventListener('open', resolve, { once: true })
-      this.ws.addEventListener('error', () => reject(new Error('websocket connect failed')), { once: true })
+      this.ws.addEventListener('error', () => reject(new Error('websocket connect failed')), {
+        once: true
+      })
     })
   }
 
@@ -203,7 +210,9 @@ async function main() {
           return true
         })()`)
         if (!found) fail(`no input for ${args.selector ?? `label "${args.label}"`}`)
-        console.log(`filled ${args.selector ?? `label "${args.label}"`} with ${JSON.stringify(args.value)}`)
+        console.log(
+          `filled ${args.selector ?? `label "${args.label}"`} with ${JSON.stringify(args.value)}`
+        )
         break
       }
       case 'key': {

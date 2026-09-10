@@ -62,19 +62,19 @@ If `doctor` fails, read `$RUN_ROOT/app.log` (build errors, Electron crashes), fi
 
 All commands: `node .cursor/skills/verify-cohort/scripts/cohort-drive.mjs <cmd> --port $PORT ...`. Exit code 0 on success, 1 with a stderr message on failure.
 
-| Command | Purpose |
-| --- | --- |
-| `doctor` | instance health (see above) |
-| `state [--path f.json]` | print `window.cohort.list()` — read-only state dump |
-| `eval --js EXPR` | evaluate EXPR in the page, print JSON result |
-| `click --text TXT` | click a visible button/link whose trimmed text is exactly TXT |
-| `click --selector CSS` | click by CSS selector |
-| `fill --label TXT --value V` | set the input inside `<label>` containing TXT (React-safe) |
-| `fill --selector CSS --value V` | set by CSS selector |
-| `key --key Escape [--selector CSS]` | dispatch a keydown (Escape cancels the New-workspace draft) |
-| `wait --js EXPR [--timeout MS]` | poll EXPR (default 15 s) until truthy |
-| `snapshot [--path f.txt]` | text tree of visible headings, buttons, inputs, alerts, list items |
-| `screenshot --path f.png` | PNG of the window |
+| Command                             | Purpose                                                            |
+| ----------------------------------- | ------------------------------------------------------------------ |
+| `doctor`                            | instance health (see above)                                        |
+| `state [--path f.json]`             | print `window.cohort.list()` — read-only state dump                |
+| `eval --js EXPR`                    | evaluate EXPR in the page, print JSON result                       |
+| `click --text TXT`                  | click a visible button/link whose trimmed text is exactly TXT      |
+| `click --selector CSS`              | click by CSS selector                                              |
+| `fill --label TXT --value V`        | set the input inside `<label>` containing TXT (React-safe)         |
+| `fill --selector CSS --value V`     | set by CSS selector                                                |
+| `key --key Escape [--selector CSS]` | dispatch a keydown (Escape cancels the New-workspace draft)        |
+| `wait --js EXPR [--timeout MS]`     | poll EXPR (default 15 s) until truthy                              |
+| `snapshot [--path f.txt]`           | text tree of visible headings, buttons, inputs, alerts, list items |
+| `screenshot --path f.png`           | PNG of the window                                                  |
 
 Stable handles in this repo (prefer these over CSS position):
 
