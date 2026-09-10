@@ -98,6 +98,44 @@ describe('RosterStore', () => {
     store.close()
   })
 
+  it('migrates a uuid-shaped teammates table and loads Hatch', () => {
+    const home = tempHome()
+    const db = new Database(stateDbPath(home))
+    db.exec(`
+      CREATE TABLE workspaces (
+        uuid TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE meta (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      );
+      CREATE TABLE teammates (
+        uuid TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+    `)
+    db.prepare(`INSERT INTO meta (key, value) VALUES ('current_uuid', ?)`).run(
+      '2289d696-83ac-41d7-bafe-07270fdef875'
+    )
+    db.prepare(`INSERT INTO meta (key, value) VALUES ('current_id', ?)`).run('hatch')
+    db.close()
+
+    const store = new RosterStore(home)
+    expect(store.load()).toEqual(hatchHome())
+    store.close()
+
+    const check = new Database(stateDbPath(home), { readonly: true, fileMustExist: true })
+    try {
+      const cols = check.prepare(`PRAGMA table_info(teammates)`).all() as { name: string }[]
+      expect(cols.map((col) => col.name)).toEqual(['id', 'name'])
+    } finally {
+      check.close()
+    }
+  })
+
   it('ignores leftover current_uuid and writes current_id on load', () => {
     const home = tempHome()
     const db = new Database(stateDbPath(home))
