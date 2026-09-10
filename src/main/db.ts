@@ -12,10 +12,9 @@ export function openRosterDb(home: string): RosterDb {
   client.pragma('foreign_keys = ON')
   const db = drizzle({ client, schema })
   db.$client.exec(`
-    CREATE TABLE IF NOT EXISTS workspaces (
-      uuid TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      created_at INTEGER NOT NULL
+    CREATE TABLE IF NOT EXISTS teammates (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS meta (
       key TEXT PRIMARY KEY,

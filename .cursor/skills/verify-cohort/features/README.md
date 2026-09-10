@@ -6,24 +6,23 @@ This directory is the maintained source for verifying the user-facing behavior o
 
 - Instance launched per `../SKILL.md` with scratch `COHORT_HOME=$RUN_ROOT/home`, `--user-data-dir=$RUN_ROOT/user-data`, and `REMOTE_DEBUGGING_PORT=$PORT`.
 - `doctor` passed and the recorded launch PID is alive.
-- `$RUN_ROOT` is under `$TMPDIR/cohort-verify/` — never the user's real `~/.cohort`.
-- No workspace exists unless the recipe created it in this run.
+- `$RUN_ROOT` is under `$TMPDIR/cohort-verify/`. Never use the user's real `~/.cohort`.
+- Hatch exists. No workspace exists.
 - Never drive an instance this verification run did not start.
 
 ## Driving conventions
 
 - Start every recipe from the baseline state unless its preconditions say otherwise.
-- Prefer exact button text, the `Name` label, `aria-current="page"`, and the `h1` over CSS position.
+- Prefer exact button text, the Crew heading, `aria-current="page"`, and the `h1` over CSS position.
 - Treat every command as literal. Keep quoted names unchanged.
-- Observe state with `state`, `snapshot`, and `eval`; mutate only through DOM `click`/`fill`/`key`, except the add-files drop path documented in `add-files.md`.
-- Workspace names in recipes (`Verify Alpha`, `Verify Beta`) are fixtures; create them in the run and let cleanup remove the scratch home.
+- Observe state with `state`, `snapshot`, and `eval`; mutate only through DOM `click`.
+- Hatch is a fixture that the app already has. Do not create a workspace to reach home.
 
 ## Proof and skip reporting
 
 - Capture the user action and the resulting state, not only the final screen.
-- UI proof: `snapshot` before/after plus a `screenshot` after, with the workspace name visible in the `h1`.
-- Mutation proof: a read-only second view — `state` JSON, the workspace folder on disk, and the `state.sqlite` rows.
-- Sandbox proof: the badge text and, on error, the `p[role="alert"]` box error.
+- UI proof: `snapshot` before/after plus a `screenshot` after, with Hatch visible in the `h1`.
+- Mutation proof: a read-only second view. Capture `state` JSON and the `state.sqlite` `meta.current_id` row.
 - Record the feature ID and `$RUN_ROOT` with every artifact batch.
 - Report an unreachable path with the attempted command and the unmet precondition.
 - Do not report a skipped entry point as verified through a different path.
@@ -41,7 +40,4 @@ Keep implementation details out of the map. Name only user paths, stable handles
 
 ## Features
 
-- [Create a workspace](./create-workspace.md) covers drafting, naming, blank-name fallback, cancel, and the folder/DB side effects.
-- [Switch workspace](./switch-workspace.md) covers roster selection, current-marker moves, and per-workspace files.
-- [Add files](./add-files.md) covers the drop path end state, name collisions, non-file rejection, and the un-automatable native picker.
-- [Sandbox status](./sandbox-status.md) covers the badge lifecycle and what each state proves about the Boxlite mount.
+- [Bot roster](./bot-roster.md) covers Hatch on launch, the Crew heading, an empty Hatch thread, persistence across reopen, and clicking Hatch staying current.
