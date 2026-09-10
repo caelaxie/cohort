@@ -4,14 +4,14 @@ Open-source Grok Bot: named AI teammates on this Mac.
 The lead bot is **Hatch**. Runtime: Prime Agent, embedded. Browser hands on this Mac while the app is open.
 v1 is for you. The crew is the product — do not invent a first vertical.
 
-This branch redefines the product. It does not ship the reshape.
+This branch redefines the product. The home screen is the named-bot roster. Later v1 items are still open.
 
 Authority for v1 behavior: this file.
 
 ## v1 — Personal crew
 
-- [ ] Named bots are the home screen (not workspaces)
-- [ ] Hatch is the lead bot on that roster (Hatch is not the product name)
+- [x] Named bots are the home screen (not workspaces)
+- [x] Hatch is the lead bot on that roster (Hatch is not the product name)
 - [ ] Talk to Hatch and hatched bots as teammates
 - [ ] Hatch can hatch another named bot
 - [ ] Hatch can coordinate other bots

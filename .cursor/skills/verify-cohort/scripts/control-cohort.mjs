@@ -243,18 +243,27 @@ async function cmdLaunch(flags) {
     fail('app deps missing; run pnpm install at the repo root')
   }
   const id = flags.id || `r${Date.now()}`
-  const runDir = resolve(flags['run-dir'] || process.env.VERIFY_COHORT_RUN || join(skillDir, 'runs', id))
+  const runDir = resolve(
+    flags['run-dir'] || process.env.VERIFY_COHORT_RUN || join(skillDir, 'runs', id)
+  )
   const home = join(runDir, 'home')
   const userData = join(runDir, 'electron-profile')
   if (resolve(home) === resolve(defaultCohortHome)) {
     fail('refusing to use ~/.cohort; verification needs an isolated COHORT_HOME')
   }
 
-  if (!flags.force && existsSync(lastRunPath) && !process.env.VERIFY_COHORT_RUN && !flags['run-dir']) {
+  if (
+    !flags.force &&
+    existsSync(lastRunPath) &&
+    !process.env.VERIFY_COHORT_RUN &&
+    !flags['run-dir']
+  ) {
     try {
       const previous = readRun(readFileSync(lastRunPath, 'utf8').trim())
       if (pidAlive(previous.pid)) {
-        fail(`already running pid=${previous.pid} runDir=${previous.runDir}; cleanup first or pass --run-dir`)
+        fail(
+          `already running pid=${previous.pid} runDir=${previous.runDir}; cleanup first or pass --run-dir`
+        )
       }
     } catch {
       // stale pointer
@@ -341,7 +350,8 @@ async function cmdDoctor() {
     const page = targets.find((item) => item.type === 'page')
     title = page?.title ?? ''
     url = page?.url ?? ''
-    if (title !== 'Cohort') problems.push(`window title is ${JSON.stringify(title)}, expected Cohort`)
+    if (title !== 'Cohort')
+      problems.push(`window title is ${JSON.stringify(title)}, expected Cohort`)
     if (url.startsWith('http') && !url.includes('localhost') && !url.includes('127.0.0.1')) {
       problems.push(`renderer url looks wrong: ${url}`)
     }
@@ -353,7 +363,9 @@ async function cmdDoctor() {
     const { browser, page } = await connectPage(run)
     text = (await page.locator('body').innerText()).replace(/\s+/g, ' ').trim()
     await browser.close()
-    if (!text.includes('Workspaces')) problems.push('renderer did not paint Workspaces')
+    if (!text.includes('Crew') || !text.includes('Hatch')) {
+      problems.push('renderer did not paint Crew and Hatch')
+    }
     if (text.includes('The app bridge is missing')) {
       problems.push('window.cohort is missing; you are not in the Electron window')
     }
@@ -361,7 +373,7 @@ async function cmdDoctor() {
     problems.push(`renderer: ${error instanceof Error ? error.message : error}`)
   }
 
-  const workspaceCount = sqlite(run.home, 'select count(*) from workspaces;')
+  const teammateCount = sqlite(run.home, 'select count(*) from teammates;')
   writeRun(run)
   const summary = [
     `pid=${run.pid}`,
@@ -370,7 +382,7 @@ async function cmdDoctor() {
     `title=${title || '?'}`,
     `home=${run.home}`,
     `userData=${run.userData}`,
-    `workspaces=${workspaceCount}`,
+    `teammates=${teammateCount}`,
     `url=${url}`
   ].join(' ')
   if (problems.length) fail(`${problems.join('; ')} | ${summary}`)
@@ -382,7 +394,8 @@ async function withPage(fn) {
   if (resolve(run.home) === resolve(defaultCohortHome)) {
     fail('refusing to drive ~/.cohort')
   }
-  if (!pidAlive(run.pid) && !listenerPid(run.cdpPort)) fail('instance is down; doctor, then relaunch')
+  if (!pidAlive(run.pid) && !listenerPid(run.cdpPort))
+    fail('instance is down; doctor, then relaunch')
   const { browser, page } = await connectPage(run)
   try {
     return await fn(page, run)
@@ -470,9 +483,13 @@ async function cmdText() {
 
 function cmdRoster() {
   const run = readRun()
-  const rows = sqlite(run.home, "select uuid || '|' || name from workspaces order by created_at, uuid;")
-  const current = sqlite(run.home, "select value from meta where key='current_uuid';")
-  console.log(`current=${current || ''}`)
+  const rows = sqlite(
+    run.home,
+    "select uuid || '|' || name from teammates order by created_at, uuid;"
+  )
+  const current = sqlite(run.home, "select value from meta where key='current_id';")
+  console.log(`current=${current || 'hatch'}`)
+  console.log('hatch|Hatch')
   console.log(rows || '')
 }
 
@@ -545,7 +562,8 @@ function cmdCleanup() {
     if (!pidAlive(run.pid) && !listenerPid(run.cdpPort)) break
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200)
   }
-  if (listenerPid(run.cdpPort)) fail(`port ${run.cdpPort} still listening; not killing by process name`)
+  if (listenerPid(run.cdpPort))
+    fail(`port ${run.cdpPort} still listening; not killing by process name`)
   if (run.runDir.startsWith(skillDir) || run.runDir.startsWith('/tmp/')) {
     rmSync(run.runDir, { recursive: true, force: true })
   }

@@ -2,7 +2,7 @@
 
 This directory is the maintained source for verifying the user-facing behavior of the Cohort Electron window. Read the index before driving the app, then use the matching feature file as the recipe.
 
-The shipped surface is the leftover workspace loop (roster, add-files, files rail, sandbox badge). Named bots / Hatch are not on this window.
+The shipped surface is the crew roster with Hatch as lead. Leftover workspace recipes below are history until rewritten.
 
 ## Baseline preconditions
 
@@ -43,8 +43,9 @@ Keep implementation details out of the map. Name only user paths, stable handles
 
 ## Features
 
-- [Create a workspace](./create-workspace.md) covers empty state, New/Create/Cancel/Escape, optional name, and persistence.
-- [Switch workspace](./switch-workspace.md) covers selecting another roster row and the current indicator, title, and files rail.
-- [Add files](./add-files.md) covers the Add files button, native open dialog, cancel, copy notice, and disk landing.
-- [Files rail](./files-rail.md) covers the look-only right list for the current workspace, including empty and nested names.
-- [Sandbox status](./sandbox-status.md) covers the starting / ready / error badge bound to the current workspace.
+- [Bot roster](./bot-roster.md) covers Hatch as the lead bot on the home screen.
+- [Create a workspace](./create-workspace.md) leftover. Not on the shipped home.
+- [Switch workspace](./switch-workspace.md) leftover. Not on the shipped home.
+- [Add files](./add-files.md) leftover. Not on the shipped home.
+- [Files rail](./files-rail.md) leftover. Not on the shipped home.
+- [Sandbox status](./sandbox-status.md) leftover. Not on the shipped home.
