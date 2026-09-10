@@ -1,12 +1,7 @@
 import { useEffect, useState } from 'react'
 import { BotMain } from '@/components/bot-main'
 import { BotSidebar } from '@/components/bot-sidebar'
-import {
-  hatchOnlyRoster,
-  type BotId,
-  type HomeView,
-  type Roster
-} from '../../shared/roster'
+import { hatchOnlyRoster, type BotId, type HomeView, type Roster } from '../../shared/roster'
 
 function viewWith(roster: Roster, error: string | null = null): HomeView {
   return { roster, error }

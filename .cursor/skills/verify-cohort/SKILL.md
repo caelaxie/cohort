@@ -60,12 +60,12 @@ Prints pid, electronPid, cdp URL, home, userData, teammate count.
 
 Use `control-cohort` ARIA commands. Stable handles from this UI:
 
-| Handle | What it is |
-| --- | --- |
-| `heading` name `Crew` level 2 | Left roster heading |
-| `button` name `Hatch` | Lead bot. Current row has `aria-current=page` |
+| Handle                         | What it is                                               |
+| ------------------------------ | -------------------------------------------------------- |
+| `heading` name `Crew` level 2  | Left roster heading                                      |
+| `button` name `Hatch`          | Lead bot. Current row has `aria-current=page`            |
 | `heading` name `Hatch` level 1 | Main title while Hatch is current, including first paint |
-| `alert` | Sidebar errors (`role="alert"`) |
+| `alert`                        | Sidebar errors (`role="alert"`)                          |
 
 ```bash
 $CTRL expect --role heading --name Crew --level 2

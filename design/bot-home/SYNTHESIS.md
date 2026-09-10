@@ -15,20 +15,21 @@ Cross-judge: skipped. All runners were inherit-parent grok-4.6. Parent scored th
 
 ## Scores
 
-| Criterion | C2 | C3 |
-| --- | --- | --- |
-| Hatch unomitabble | Strong. Constant, not a row. | Weaker. Seeds a Hatch row. |
-| First paint | Strong. `openingView()` shows Hatch. | Weaker. Wordmark shell, no Hatch. |
-| Subtract leftover | Strong. | Strong. Rejects leftover fields in parse. |
-| Small IPC | Strong. `home` / `setCurrent` / `onState`. | Strong. `roster` / `setCurrent` / `onRoster`. |
-| No dual API | Strong. | Strong. |
-| Scope | Strong. | Strong. |
+| Criterion         | C2                                         | C3                                            |
+| ----------------- | ------------------------------------------ | --------------------------------------------- |
+| Hatch unomitabble | Strong. Constant, not a row.               | Weaker. Seeds a Hatch row.                    |
+| First paint       | Strong. `openingView()` shows Hatch.       | Weaker. Wordmark shell, no Hatch.             |
+| Subtract leftover | Strong.                                    | Strong. Rejects leftover fields in parse.     |
+| Small IPC         | Strong. `home` / `setCurrent` / `onState`. | Strong. `roster` / `setCurrent` / `onRoster`. |
+| No dual API       | Strong.                                    | Strong.                                       |
+| Scope             | Strong.                                    | Strong.                                       |
 
 Base is C2. A future maintainer cannot delete Hatch from sqlite because Hatch is not there.
 
 ## Grafts
 
 From C3 into C2:
+
 - `current` is a `BotId`, not a copied `Bot` object.
 - `parseRoster` rejects leftover workspace/files/box fields.
 - Helpers `rosterBots` and `currentBot`.
