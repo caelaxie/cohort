@@ -81,6 +81,7 @@ Stable handles in this repo (prefer these over CSS position):
 - Sidebar heading: `Crew`.
 - Current bot: sidebar button with `aria-current="page"`; main header is the `h1`.
 - Hatch row: button whose trimmed text is `Hatch`.
+- Settings footer: button whose trimmed text is `Settings`. The Settings pane `h1` is `Settings`.
 - Errors render in `p[role="alert"]`.
 
 Feature-by-feature recipes live in `features/`. Read `features/README.md` before driving.
@@ -93,6 +94,7 @@ Proof artifacts go in `$RUN_ROOT/evidence/` and survive cleanup. For every featu
 2. `state --path "$RUN_ROOT/evidence/<step>.json"` after mutations.
 3. Side effects outside the UI:
    - Roster DB: `sqlite3 "$RUN_ROOT/home/state.sqlite" "SELECT key, value FROM meta; SELECT id, name FROM teammates;"`.
+   - Kernel auth when `COHORT_HOME` is set: `$RUN_ROOT/home/prime/agent/auth.json`. Never the owner's `~/.prime/agent/auth.json`.
 4. Name artifacts after the feature and step, e.g. `bot-roster/after.png`.
 
 Proof standards:

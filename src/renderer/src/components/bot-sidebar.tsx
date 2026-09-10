@@ -1,13 +1,30 @@
 import { cn } from '@/lib/utils'
 import { rosterBots, type Roster } from '../../../shared/roster'
+import { readyForTalk, type KernelStatus } from '../../../shared/kernel'
+
+export type Screen = 'crew' | 'settings'
 
 type Props = {
   roster: Roster
   error: string | null
   onSelect: (id: string) => void
+  screen: Screen
+  kernelStatus: KernelStatus | null
+  onOpenSettings: () => void
 }
 
-export function BotSidebar({ roster, error, onSelect }: Props): React.JSX.Element {
+function kernelLine(status: KernelStatus): string {
+  return readyForTalk(status) ? status.model : 'No model connected'
+}
+
+export function BotSidebar({
+  roster,
+  error,
+  onSelect,
+  screen,
+  kernelStatus,
+  onOpenSettings
+}: Props): React.JSX.Element {
   return (
     <aside className="flex w-[244px] shrink-0 flex-col border-r border-hairline bg-surface-1">
       <div className="flex h-14 items-center px-3">
@@ -29,14 +46,14 @@ export function BotSidebar({ roster, error, onSelect }: Props): React.JSX.Elemen
           <li key={bot.id}>
             <button
               type="button"
-              aria-current={bot.id === roster.current ? 'page' : undefined}
+              aria-current={screen === 'crew' && bot.id === roster.current ? 'page' : undefined}
               className={cn(
                 'flex min-h-8 w-full items-center rounded-md px-2 py-1.5 text-left text-sm text-ink-muted',
                 'transition-[background-color,color] duration-150 ease-out',
                 'hover:bg-surface-2 hover:text-ink',
                 'focus-visible:outline-2 focus-visible:outline-offset-2',
                 'focus-visible:outline-[color-mix(in_srgb,var(--color-primary-focus)_50%,transparent)]',
-                bot.id === roster.current && 'bg-surface-2 text-ink'
+                screen === 'crew' && bot.id === roster.current && 'bg-surface-2 text-ink'
               )}
               onClick={() => onSelect(bot.id)}
             >
@@ -45,6 +62,27 @@ export function BotSidebar({ roster, error, onSelect }: Props): React.JSX.Elemen
           </li>
         ))}
       </ul>
+
+      <div className="shrink-0 border-t border-hairline px-2 py-3">
+        <button
+          type="button"
+          aria-current={screen === 'settings' ? 'page' : undefined}
+          className={cn(
+            'flex min-h-8 w-full items-center rounded-md px-2 py-1.5 text-left text-sm text-ink-muted',
+            'transition-[background-color,color] duration-150 ease-out',
+            'hover:bg-surface-2 hover:text-ink',
+            'focus-visible:outline-2 focus-visible:outline-offset-2',
+            'focus-visible:outline-[color-mix(in_srgb,var(--color-primary-focus)_50%,transparent)]',
+            screen === 'settings' && 'bg-surface-2 text-ink'
+          )}
+          onClick={onOpenSettings}
+        >
+          Settings
+        </button>
+        {kernelStatus ? (
+          <p className="px-2 pt-1 text-xs text-ink-subtle">{kernelLine(kernelStatus)}</p>
+        ) : null}
+      </div>
     </aside>
   )
 }

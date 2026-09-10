@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
-import { BotSidebar } from '@/components/bot-sidebar'
+import { BotSidebar, type Screen } from '@/components/bot-sidebar'
 import { BotMain } from '@/components/bot-main'
+import { SettingsPane } from '@/components/settings-pane'
+import { parseKernelStatus, type KernelStatus } from '../../shared/kernel'
 import { hatchOnlyRoster, parseRoster, viewWith, type HomeView } from '../../shared/roster'
 
 function fail(reason: unknown, fallback: string): string {
@@ -13,6 +15,9 @@ function App(): React.JSX.Element {
       ? viewWith(hatchOnlyRoster())
       : viewWith(hatchOnlyRoster(), 'The app bridge is missing. Restart Cohort.')
   )
+  const [screen, setScreen] = useState<Screen>('crew')
+  const [kernelStatus, setKernelStatus] = useState<KernelStatus | null>(null)
+  const [kernelError, setKernelError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!window.cohort) return
@@ -24,12 +29,31 @@ function App(): React.JSX.Element {
       })
   }, [])
 
+  useEffect(() => {
+    if (!window.cohort) return
+    void window.cohort
+      .kernel()
+      .then((raw) => {
+        setKernelStatus(parseKernelStatus(raw))
+        setKernelError(null)
+      })
+      .catch((reason: unknown) => {
+        setKernelError(fail(reason, 'Could not load model'))
+      })
+  }, [])
+
   return (
     <div className="flex h-full min-h-0 bg-canvas text-ink">
       <BotSidebar
         roster={view.roster}
         error={view.error}
+        screen={screen}
+        kernelStatus={kernelStatus}
+        onOpenSettings={() => {
+          setScreen('settings')
+        }}
         onSelect={(id) => {
+          setScreen('crew')
           void window.cohort
             .select(id)
             .then((raw) => setView(viewWith(parseRoster(raw))))
@@ -38,7 +62,24 @@ function App(): React.JSX.Element {
             })
         }}
       />
-      <BotMain roster={view.roster} />
+      {screen === 'settings' ? (
+        <SettingsPane
+          status={kernelStatus}
+          error={kernelError}
+          onConnect={async (input) => {
+            try {
+              const raw = await window.cohort.connect(input)
+              setKernelStatus(parseKernelStatus(raw))
+              setKernelError(null)
+            } catch (reason: unknown) {
+              setKernelError(fail(reason, 'Could not connect'))
+              throw reason
+            }
+          }}
+        />
+      ) : (
+        <BotMain roster={view.roster} />
+      )}
     </div>
   )
 }

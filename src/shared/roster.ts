@@ -23,6 +23,8 @@ export type HomeView = {
 export type CohortApi = {
   home: () => Promise<unknown>
   select: (id: string) => Promise<unknown>
+  kernel: () => Promise<unknown>
+  connect: (input?: unknown) => Promise<unknown>
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
