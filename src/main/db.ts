@@ -10,17 +10,15 @@ export function openRosterDb(home: string): RosterDb {
   mkdirSync(home, { recursive: true })
   const client = new Database(stateDbPath(home))
   client.pragma('foreign_keys = ON')
-  const db = drizzle({ client, schema })
-  db.$client.exec(`
-    CREATE TABLE IF NOT EXISTS workspaces (
-      uuid TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      created_at INTEGER NOT NULL
-    );
+  client.exec(`
     CREATE TABLE IF NOT EXISTS meta (
       key TEXT PRIMARY KEY,
       value TEXT
     );
+    CREATE TABLE IF NOT EXISTS teammates (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL
+    );
   `)
-  return db
+  return drizzle({ client, schema })
 }

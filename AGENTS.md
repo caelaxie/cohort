@@ -4,7 +4,6 @@ Open-source Grok Bot: named AI teammates on this Mac.
 The lead bot is **Hatch**. v1 is for the owner. Do not invent a first vertical — the crew is the product.
 
 See `ROADMAP.md` for v1 requirements and sequence.
-This branch redefines the product. Do not implement the reshape unless asked.
 
 ## Runtime
 

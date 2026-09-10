@@ -6,7 +6,7 @@
 //
 // Commands:
 //   doctor                        check the instance is worth driving
-//   state      [--path out.json]  print window.cohort.list() (read-only)
+//   state      [--path out.json]  print window.cohort.home() (read-only)
 //   eval       --js EXPR          evaluate an expression in the page, print JSON
 //   click      --text TXT | --selector CSS
 //   fill       --label TXT | --selector CSS   --value TXT
@@ -159,19 +159,19 @@ async function main() {
       case 'doctor': {
         const bridge = await cdp.evaljs(`typeof window.cohort === 'object' && !!window.cohort`)
         if (!bridge) fail('window.cohort bridge missing — wrong page or broken preload')
-        const state = await cdp.evaljs(`window.cohort.list()`)
+        const state = await cdp.evaljs(`window.cohort.home()`)
         const report = {
           ok: true,
           page: { title: page.title, url: page.url },
           bridge: true,
-          workspaces: state.workspaces.length,
-          boxStatus: state.boxStatus
+          hatch: { id: state.hatch.id, name: state.hatch.name },
+          current: state.current
         }
         console.log(JSON.stringify(report, null, 2))
         break
       }
       case 'state': {
-        const state = await cdp.evaljs(`window.cohort.list()`)
+        const state = await cdp.evaljs(`window.cohort.home()`)
         const text = JSON.stringify(state, null, 2)
         if (args.path) writeFileSync(args.path, text + '\n')
         console.log(text)
