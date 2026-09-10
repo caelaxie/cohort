@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
-import { parseHome } from '../shared/roster'
+import { parseRoster } from '../shared/roster'
 import { stateDbPath } from './paths'
 import { RosterStore } from './roster'
 
@@ -24,17 +24,11 @@ function dataVersion(home: string): number {
   }
 }
 
-function hatchHome() {
+function hatchRoster() {
   return {
-    roster: {
-      hatch: { id: 'hatch', name: 'Hatch' },
-      others: [],
-      current: 'hatch'
-    },
-    thread: {
-      bot: { id: 'hatch', name: 'Hatch' },
-      messages: []
-    }
+    hatch: { id: 'hatch', name: 'Hatch' },
+    others: [],
+    current: 'hatch'
   }
 }
 
@@ -45,13 +39,13 @@ afterEach(() => {
 })
 
 describe('RosterStore', () => {
-  it('loads Hatch only with an empty thread', () => {
+  it('loads Hatch only', () => {
     const store = new RosterStore(tempHome())
-    expect(store.load()).toEqual(hatchHome())
+    expect(store.load()).toEqual(hatchRoster())
     store.close()
   })
 
-  it('second load and reopen converge to the same home', () => {
+  it('second load and reopen converge to the same roster', () => {
     const home = tempHome()
     const store = new RosterStore(home)
     const first = store.load()
@@ -75,7 +69,7 @@ describe('RosterStore', () => {
     db.close()
 
     const repaired = new RosterStore(home)
-    expect(repaired.load()).toEqual(hatchHome())
+    expect(repaired.load()).toEqual(hatchRoster())
     repaired.close()
 
     const check = new Database(stateDbPath(home), { readonly: true, fileMustExist: true })
@@ -91,49 +85,11 @@ describe('RosterStore', () => {
   it('select hatch when already current does not bump sqlite data_version', () => {
     const home = tempHome()
     const store = new RosterStore(home)
-    expect(store.load()).toEqual(hatchHome())
+    expect(store.load()).toEqual(hatchRoster())
     const before = dataVersion(home)
-    expect(store.select('hatch')).toEqual(hatchHome())
+    expect(store.select('hatch')).toEqual(hatchRoster())
     expect(dataVersion(home)).toBe(before)
     store.close()
-  })
-
-  it('migrates a uuid-shaped teammates table and loads Hatch', () => {
-    const home = tempHome()
-    const db = new Database(stateDbPath(home))
-    db.exec(`
-      CREATE TABLE workspaces (
-        uuid TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        created_at INTEGER NOT NULL
-      );
-      CREATE TABLE meta (
-        key TEXT PRIMARY KEY,
-        value TEXT
-      );
-      CREATE TABLE teammates (
-        uuid TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        created_at INTEGER NOT NULL
-      );
-    `)
-    db.prepare(`INSERT INTO meta (key, value) VALUES ('current_uuid', ?)`).run(
-      '2289d696-83ac-41d7-bafe-07270fdef875'
-    )
-    db.prepare(`INSERT INTO meta (key, value) VALUES ('current_id', ?)`).run('hatch')
-    db.close()
-
-    const store = new RosterStore(home)
-    expect(store.load()).toEqual(hatchHome())
-    store.close()
-
-    const check = new Database(stateDbPath(home), { readonly: true, fileMustExist: true })
-    try {
-      const cols = check.prepare(`PRAGMA table_info(teammates)`).all() as { name: string }[]
-      expect(cols.map((col) => col.name)).toEqual(['id', 'name'])
-    } finally {
-      check.close()
-    }
   })
 
   it('ignores leftover current_uuid and writes current_id on load', () => {
@@ -155,7 +111,7 @@ describe('RosterStore', () => {
     db.close()
 
     const store = new RosterStore(home)
-    expect(store.load()).toEqual(hatchHome())
+    expect(store.load()).toEqual(hatchRoster())
     store.close()
 
     const check = new Database(stateDbPath(home), { readonly: true, fileMustExist: true })
@@ -204,39 +160,15 @@ describe('RosterStore', () => {
   })
 })
 
-describe('parseHome', () => {
+describe('parseRoster', () => {
   it('throws without hatch', () => {
-    expect(() =>
-      parseHome({
-        roster: { others: [], current: 'hatch' },
-        thread: { bot: { id: 'hatch', name: 'Hatch' }, messages: [] }
-      })
-    ).toThrow('missing hatch')
+    expect(() => parseRoster({ others: [], current: 'hatch' })).toThrow('missing hatch')
   })
 
-  it('throws on leftover workspace fields', () => {
-    expect(() =>
-      parseHome({
-        roster: { hatch: { id: 'hatch', name: 'Hatch' }, others: [], current: 'hatch' },
-        thread: { bot: { id: 'hatch', name: 'Hatch' }, messages: [] },
-        workspaces: []
-      })
-    ).toThrow('leftover workspace fields')
-  })
-
-  it('throws on hatch in others and on a non-empty thread', () => {
+  it('throws on hatch in others', () => {
     const hatch = { id: 'hatch', name: 'Hatch' }
-    expect(() =>
-      parseHome({
-        roster: { hatch, others: [hatch], current: 'hatch' },
-        thread: { bot: hatch, messages: [] }
-      })
-    ).toThrow('hatch in others')
-    expect(() =>
-      parseHome({
-        roster: { hatch, others: [], current: 'hatch' },
-        thread: { bot: hatch, messages: [{ body: 'hi' }] }
-      })
-    ).toThrow('non-empty messages')
+    expect(() => parseRoster({ hatch, others: [hatch], current: 'hatch' })).toThrow(
+      'hatch in others'
+    )
   })
 })

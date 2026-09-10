@@ -15,16 +15,6 @@ export type Roster = {
   readonly current: BotId
 }
 
-export type EmptyThread = {
-  readonly bot: Bot
-  readonly messages: readonly []
-}
-
-export type Home = {
-  readonly roster: Roster
-  readonly thread: EmptyThread
-}
-
 export type HomeView = {
   readonly roster: Roster
   readonly error: string | null
@@ -33,10 +23,7 @@ export type HomeView = {
 export type CohortApi = {
   home: () => Promise<unknown>
   select: (id: string) => Promise<unknown>
-  onState: (listener: (state: unknown) => void) => () => void
 }
-
-const LEFTOVER_HOME_FIELDS = ['workspaces', 'files', 'boxStatus'] as const
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -66,18 +53,8 @@ export function currentBot(roster: Roster): Bot {
   return bot
 }
 
-export function homeFromRoster(roster: Roster): Home {
-  return {
-    roster,
-    thread: { bot: currentBot(roster), messages: [] }
-  }
-}
-
-export function viewWith(source: Roster | Home, error: string | null = null): HomeView {
-  if ('thread' in source) {
-    return { roster: source.roster, error }
-  }
-  return { roster: source, error }
+export function viewWith(roster: Roster, error: string | null = null): HomeView {
+  return { roster, error }
 }
 
 function parseHatch(value: unknown): Hatch {
@@ -87,7 +64,7 @@ function parseHatch(value: unknown): Hatch {
   return HATCH
 }
 
-function parseTeammate(value: unknown): Teammate {
+export function parseTeammate(value: unknown): Teammate {
   if (!isRecord(value) || typeof value.name !== 'string') {
     throw new Error('invalid teammate')
   }
@@ -98,7 +75,7 @@ function parseTeammate(value: unknown): Teammate {
   return { id, name: value.name }
 }
 
-function parseRoster(value: unknown): Roster {
+export function parseRoster(value: unknown): Roster {
   if (!isRecord(value)) {
     throw new Error('invalid roster')
   }
@@ -119,32 +96,4 @@ function parseRoster(value: unknown): Roster {
     throw new Error('dangling current')
   }
   return { hatch, others, current }
-}
-
-function parseEmptyThread(value: unknown, roster: Roster): EmptyThread {
-  if (!isRecord(value)) {
-    throw new Error('invalid thread')
-  }
-  if (!Array.isArray(value.messages) || value.messages.length !== 0) {
-    throw new Error('non-empty messages')
-  }
-  const bot = currentBot(roster)
-  if (!isRecord(value.bot) || value.bot.id !== bot.id || value.bot.name !== bot.name) {
-    throw new Error('thread bot mismatch')
-  }
-  return { bot, messages: [] }
-}
-
-export function parseHome(raw: unknown): Home {
-  if (!isRecord(raw)) {
-    throw new Error('invalid home')
-  }
-  for (const field of LEFTOVER_HOME_FIELDS) {
-    if (field in raw) {
-      throw new Error('leftover workspace fields')
-    }
-  }
-  const roster = parseRoster(raw.roster)
-  const thread = parseEmptyThread(raw.thread, roster)
-  return { roster, thread }
 }

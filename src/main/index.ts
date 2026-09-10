@@ -1,8 +1,15 @@
-import { app, shell, BrowserWindow } from 'electron'
+import { tmpdir } from 'node:os'
 import { join } from 'path'
+import { app, shell, BrowserWindow } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { registerIpc } from './ipc'
+
+if (process.env.COHORT_HOME) {
+  app.setPath('userData', join(process.env.COHORT_HOME, 'electron'))
+} else if (is.dev) {
+  app.setPath('userData', join(tmpdir(), 'cohort-electron-dev'))
+}
 
 let shutdown: (() => Promise<void>) | null = null
 
@@ -38,19 +45,17 @@ function createWindow(): void {
   }
 }
 
-const gotLock = is.dev ? true : app.requestSingleInstanceLock()
+const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
 } else {
-  if (!is.dev) {
-    app.on('second-instance', () => {
-      const [window] = BrowserWindow.getAllWindows()
-      if (window) {
-        if (window.isMinimized()) window.restore()
-        window.focus()
-      }
-    })
-  }
+  app.on('second-instance', () => {
+    const [window] = BrowserWindow.getAllWindows()
+    if (window) {
+      if (window.isMinimized()) window.restore()
+      window.focus()
+    }
+  })
 
   app.whenReady().then(() => {
     electronApp.setAppUserModelId('app.cohort.desktop')

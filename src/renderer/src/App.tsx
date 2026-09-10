@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react'
 import { BotSidebar } from '@/components/bot-sidebar'
 import { BotMain } from '@/components/bot-main'
-import { hatchOnlyRoster, parseHome, viewWith, type HomeView } from '../../shared/roster'
+import { hatchOnlyRoster, parseRoster, viewWith, type HomeView } from '../../shared/roster'
+
+function fail(reason: unknown, fallback: string): string {
+  return reason instanceof Error ? reason.message : fallback
+}
 
 function App(): React.JSX.Element {
   const [view, setView] = useState<HomeView>(() =>
@@ -14,21 +18,10 @@ function App(): React.JSX.Element {
     if (!window.cohort) return
     void window.cohort
       .home()
-      .then((raw) => setView(viewWith(parseHome(raw))))
+      .then((raw) => setView(viewWith(parseRoster(raw))))
       .catch((reason: unknown) => {
-        setView((prev) =>
-          viewWith(prev.roster, reason instanceof Error ? reason.message : 'Could not load bots')
-        )
+        setView((prev) => viewWith(prev.roster, fail(reason, 'Could not load bots')))
       })
-    return window.cohort.onState((raw) => {
-      try {
-        setView(viewWith(parseHome(raw)))
-      } catch (reason: unknown) {
-        setView((prev) =>
-          viewWith(prev.roster, reason instanceof Error ? reason.message : 'Could not load bots')
-        )
-      }
-    })
   }, [])
 
   return (
@@ -39,14 +32,9 @@ function App(): React.JSX.Element {
         onSelect={(id) => {
           void window.cohort
             .select(id)
-            .then((raw) => setView(viewWith(parseHome(raw))))
+            .then((raw) => setView(viewWith(parseRoster(raw))))
             .catch((reason: unknown) => {
-              setView((prev) =>
-                viewWith(
-                  prev.roster,
-                  reason instanceof Error ? reason.message : 'Could not switch bots'
-                )
-              )
+              setView((prev) => viewWith(prev.roster, fail(reason, 'Could not switch bots')))
             })
         }}
       />

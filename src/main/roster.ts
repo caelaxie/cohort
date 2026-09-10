@@ -2,10 +2,10 @@ import { asc, eq, sql } from 'drizzle-orm'
 import {
   HATCH,
   HATCH_ID,
-  homeFromRoster,
   parseBotId,
+  parseTeammate,
   type BotId,
-  type Home,
+  type Roster,
   type Teammate
 } from '../shared/roster'
 import { openRosterDb, type RosterDb } from './db'
@@ -24,44 +24,41 @@ export class RosterStore {
     this.db.$client.close()
   }
 
-  load(): Home {
+  load(): Roster {
     const others = this.readOthers()
-    const known = new Set<string>([HATCH_ID, ...others.map((item) => item.id)])
     const stored = this.readCurrentId()
-    const current = stored !== null && known.has(stored) ? parseBotId(stored) : HATCH_ID
+    const current =
+      stored !== null && this.knownIds(others).has(stored) ? parseBotId(stored) : HATCH_ID
     if (stored !== current) {
       this.writeCurrent(current)
     }
-    return homeFromRoster({ hatch: HATCH, others, current })
+    return { hatch: HATCH, others, current }
   }
 
-  select(id: string): Home {
+  select(id: unknown): Roster {
     const botId = parseBotId(id)
     const others = this.readOthers()
-    const known = new Set<string>([HATCH_ID, ...others.map((item) => item.id)])
-    if (!known.has(botId)) {
+    if (!this.knownIds(others).has(botId)) {
       throw new Error('unknown bot')
     }
     const stored = this.readCurrentId()
     if (stored !== botId) {
       this.writeCurrent(botId)
     }
-    return homeFromRoster({ hatch: HATCH, others, current: botId })
+    return { hatch: HATCH, others, current: botId }
+  }
+
+  private knownIds(others: readonly Teammate[]): Set<string> {
+    return new Set<string>([HATCH_ID, ...others.map((item) => item.id)])
   }
 
   private readOthers(): Teammate[] {
-    const rows = this.db
+    return this.db
       .select({ id: teammates.id, name: teammates.name })
       .from(teammates)
       .orderBy(asc(teammates.id))
       .all()
-    const others: Teammate[] = []
-    for (const row of rows) {
-      const id = parseBotId(row.id)
-      if (id === HATCH_ID) continue
-      others.push({ id, name: row.name })
-    }
-    return others
+      .map(parseTeammate)
   }
 
   private readCurrentId(): string | null {

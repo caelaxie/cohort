@@ -34,7 +34,7 @@ echo "$RUN_ROOT $PORT"
 ```
 
 - Run the launch as a background job that outlives the command. In Cursor, use the Shell tool's background mode, not a bare `&`, which gets reaped when the tool call returns.
-- `COHORT_HOME` isolates app data (roster DB). `--user-data-dir` isolates Electron's profile and, with it, the single-instance lock. Without it the app refuses to start or focuses the user's own instance. Both are mandatory.
+- `COHORT_HOME` isolates app data (roster DB) and Electron's profile (`$COHORT_HOME/electron`), which is the single-instance lock. `--user-data-dir` is still passed so Chromium isolation matches if the flag is honored. Without a scratch `COHORT_HOME` the app can refuse to start or focus another instance.
 - Ready signal: `curl -s http://127.0.0.1:$PORT/json/list` returns a `page` target titled `Cohort` (usually 3–8 s; the dev server must build main, preload, and renderer first).
 - A real window opens on screen. That is expected; cleanup closes it.
 - `pnpm dev` watches sources and restarts the main process on edits. Do not edit `src/` while an instance is up.
