@@ -12,5 +12,11 @@ export type CohortApi = {
   assign: (input: unknown) => Promise<unknown>
   interrupt: (botId: string) => Promise<unknown>
   coordination: () => Promise<unknown>
+  approvals: () => Promise<unknown>
+  requestApproval: (input: unknown) => Promise<unknown>
+  approve: (id: string) => Promise<unknown>
+  deny: (id: string) => Promise<unknown>
+  denyAll: () => Promise<unknown>
   onOpenSettings: (callback: () => void) => () => void
+  onApprovalsChanged: (callback: () => void) => () => void
 }

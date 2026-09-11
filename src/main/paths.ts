@@ -13,6 +13,10 @@ export function talkDbPath(home: string): string {
   return join(home, 'talk.sqlite')
 }
 
+export function approvalDbPath(home: string): string {
+  return join(home, 'approval.sqlite')
+}
+
 export function primeWorkDir(home: string, botId: string): string {
   return join(home, 'prime-work', botId)
 }

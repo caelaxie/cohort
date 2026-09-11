@@ -648,8 +648,9 @@ describe('Chief coordination', () => {
     for (const source of [ipc, api]) {
       expect(source.includes('cohort:post')).toBe(false)
       expect(source.includes('cohort:buy')).toBe(false)
-      expect(source.includes('cohort:approve')).toBe(false)
     }
+    expect(ipc.includes('cohort:approve')).toBe(true)
+    expect(ipc.includes('cohort:request-approval')).toBe(true)
     expect(prime.includes("noTools: 'all'")).toBe(true)
     expect(prime.includes('defaultTools: []')).toBe(true)
     expect(() => parseCoordination({ running: [], apiKey: 'sk' })).toThrow('secret field')

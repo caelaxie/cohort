@@ -37,4 +37,4 @@ Preconditions:
 - To is required. There is no silent fan-out to every bot.
 - Assign on Chief is still 1:1 on the teammate thread, not a room line.
 - `fill --label` needs Message inside a `<label>` that wraps the textarea.
-- There is no Post, Buy, or Approve button.
+- Room itself has no Post or Buy control. An Ask first prompt appears only when a bot asks to send, post, buy, or delete.

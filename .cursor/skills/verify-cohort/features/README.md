@@ -46,3 +46,4 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Hatch a teammate](./hatch.md) covers naming a bot from Chief's pane, selecting it, talking as that bot, and removing it.
 - [Chief coordinates teammates](./coordinate.md) covers assigning a brief from Chief, seeing in-flight work, stopping it, and steering with a later assign.
 - [Shared room](./room.md) covers the Room pane, owner picking who answers, speaker identity per line, and 1:1 threads staying separate.
+- [Ask first](./approval.md) covers the approval prompt before send, post, buy, or delete, deny as the safe default, and the audit of requested vs decided.
