@@ -22,7 +22,6 @@ export function registerIpc(): { quit: () => Promise<void> } {
     known: (id) => store.known(id),
     turn: primeTurn({
       home,
-      primeAuthPath,
       endpoint: () => kernel.endpoint()
     })
   })

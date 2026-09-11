@@ -1,67 +1,39 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { chmod } from 'node:fs/promises'
+import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent'
 import type { Endpoint } from './kernel'
 import { HATCH_SYSTEM } from './hatch-prompt'
 import { primeWorkDir } from './paths'
+import type { Thread } from '../shared/talk'
 import type { Turn, TurnResult } from './turn'
 
-type PrimeSessionEvent = {
-  readonly type?: string
-  readonly assistantMessageEvent?: { readonly type?: string; readonly delta?: string }
-}
+type PrimeMessage = AgentSession['messages'][number]
 
-type PrimeSession = {
-  readonly messages: unknown[]
-  prompt: (text: string) => Promise<void>
-  subscribe?: (listener: (event: PrimeSessionEvent) => void) => () => void
-  dispose: () => void
-}
+export type PrimeModule = typeof import('@earendil-works/pi-coding-agent')
 
-export type PrimeModule = {
-  createAgentSession: (options: unknown) => Promise<{ session: PrimeSession }>
-  ModelRuntime: {
-    create: (options: {
-      authPath: string
-      modelsPath: string
-      refreshOnCreate?: boolean
-      allowModelNetwork?: boolean
-    }) => Promise<{
-      getModels: () => readonly { readonly id: string; readonly provider?: string }[]
-      getModel: (
-        providerId: string,
-        modelId: string
-      ) => { readonly id: string; readonly provider?: string } | undefined
-    }>
-  }
-  SessionManager: {
-    inMemory: (cwd: string) => unknown
-  }
-  DefaultResourceLoader: new (options: {
-    cwd: string
-    agentDir: string
-    settingsManager: unknown
-    noExtensions?: boolean
-    noSkills?: boolean
-    noPromptTemplates?: boolean
-    noThemes?: boolean
-    noContextFiles?: boolean
-    systemPrompt?: string
-  }) => { reload: () => Promise<void> }
-  SettingsManager: {
-    inMemory: (settings?: unknown) => unknown
-  }
-}
+const TURN_MS = 60_000
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function isAbort(reason: unknown): boolean {
+  return (
+    typeof reason === 'object' &&
+    reason !== null &&
+    'name' in reason &&
+    reason.name === 'AbortError'
+  )
+}
+
 function failed(reason: unknown): TurnResult {
-  return {
-    kind: 'turn_failed',
-    detail: reason instanceof Error && reason.message.length > 0 ? reason.message : 'turn failed'
+  if (isAbort(reason)) {
+    return { kind: 'turn_failed', detail: 'timeout' }
   }
+  if (reason instanceof Error && reason.message === 'empty reply') {
+    return { kind: 'turn_failed', detail: 'empty reply' }
+  }
+  return { kind: 'turn_failed', detail: 'turn failed' }
 }
 
 export function assistantText(messages: readonly unknown[]): string {
@@ -71,11 +43,7 @@ export function assistantText(messages: readonly unknown[]): string {
     const role = message.role ?? message.type
     if (role !== 'assistant') continue
     if (message.stopReason === 'error') {
-      throw new Error(
-        typeof message.errorMessage === 'string' && message.errorMessage.length > 0
-          ? message.errorMessage
-          : 'turn failed'
-      )
+      throw new Error('turn failed')
     }
     if (typeof message.content === 'string' && message.content.trim().length > 0) {
       return message.content.trim()
@@ -98,31 +66,50 @@ export function assistantText(messages: readonly unknown[]): string {
   throw new Error('empty reply')
 }
 
-async function mergeCohortAuth(authPath: string, key: string): Promise<void> {
-  let records: Record<string, unknown> = {}
-  try {
-    const raw = await readFile(authPath, 'utf8')
-    const parsed: unknown = JSON.parse(raw)
-    if (isRecord(parsed)) records = parsed
-  } catch {
-    records = {}
+function priorMessages(prior: Thread, model: string): PrimeMessage[] {
+  const messages: PrimeMessage[] = []
+  for (const turn of prior.turns) {
+    messages.push({
+      role: 'user',
+      content: turn.owner.body,
+      timestamp: turn.owner.createdAt
+    })
+    messages.push({
+      role: 'assistant',
+      content: [{ type: 'text', text: turn.bot.body }],
+      api: 'openai-completions',
+      provider: 'cohort',
+      model,
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+      },
+      stopReason: 'stop',
+      timestamp: turn.bot.createdAt
+    })
   }
-  records.cohort = { type: 'api_key', key }
-  await mkdir(dirname(authPath), { recursive: true })
-  await writeFile(authPath, `${JSON.stringify(records, null, 2)}\n`, {
-    encoding: 'utf8',
-    mode: 0o600
-  })
-  await chmod(authPath, 0o600)
+  return messages
 }
 
-async function writeModels(modelsPath: string, endpoint: Endpoint): Promise<void> {
+function streamedText(event: AgentSessionEvent): string {
+  if (event.type !== 'message_update') return ''
+  const delta = event.assistantMessageEvent
+  if (delta.type === 'text_delta' && typeof delta.delta === 'string') {
+    return delta.delta
+  }
+  return ''
+}
+
+async function writeCatalog(modelsPath: string, endpoint: Endpoint): Promise<void> {
   const models = {
     providers: {
       cohort: {
         baseUrl: endpoint.baseUrl,
         api: 'openai-completions',
-        apiKey: 'COHORT',
         compat: {
           supportsDeveloperRole: false,
           supportsReasoningEffort: false
@@ -135,107 +122,114 @@ async function writeModels(modelsPath: string, endpoint: Endpoint): Promise<void
   await writeFile(modelsPath, `${JSON.stringify(models, null, 2)}\n`, 'utf8')
 }
 
-const defaultLoad = async (): Promise<PrimeModule> =>
-  (await import('@earendil-works/pi-coding-agent')) as unknown as PrimeModule
+const defaultLoad = (): Promise<PrimeModule> => import('@earendil-works/pi-coding-agent')
+
+export function primeCatalogPath(home: string): string {
+  return join(home, 'prime', 'agent', 'models.json')
+}
 
 export function primeTurn(options: {
   readonly endpoint: () => Promise<Endpoint | null>
-  readonly primeAuthPath: string
   readonly home: string
   readonly load?: () => Promise<PrimeModule>
+  readonly timeoutMs?: number
 }): Turn {
   const load = options.load ?? defaultLoad
-  const sessions = new Map<string, Promise<PrimeSession>>()
-
-  async function openSession(botId: string, endpoint: Endpoint): Promise<PrimeSession> {
-    const module = await load()
-    const cwd = primeWorkDir(options.home, botId)
-    await mkdir(cwd, { recursive: true })
-    const modelsPath = join(dirname(options.primeAuthPath), 'models.json')
-    await writeModels(modelsPath, endpoint)
-    await mergeCohortAuth(options.primeAuthPath, endpoint.key)
-    const modelRuntime = await module.ModelRuntime.create({
-      authPath: options.primeAuthPath,
-      modelsPath,
-      refreshOnCreate: false,
-      allowModelNetwork: false
-    })
-    const model =
-      modelRuntime.getModel('cohort', endpoint.model) ??
-      modelRuntime.getModels().find((item) => item.id === endpoint.model)
-    if (model === undefined) {
-      throw new Error('turn failed')
-    }
-    const settingsManager = module.SettingsManager.inMemory({
-      compaction: { enabled: false },
-      defaultTools: []
-    })
-    const resourceLoader = new module.DefaultResourceLoader({
-      cwd,
-      agentDir: dirname(options.primeAuthPath),
-      settingsManager,
-      noExtensions: true,
-      noSkills: true,
-      noPromptTemplates: true,
-      noThemes: true,
-      noContextFiles: true,
-      systemPrompt: HATCH_SYSTEM
-    })
-    await resourceLoader.reload()
-    const { session } = await module.createAgentSession({
-      cwd,
-      agentDir: dirname(options.primeAuthPath),
-      modelRuntime,
-      model,
-      thinkingLevel: 'minimal',
-      noTools: 'all',
-      tools: [],
-      resourceLoader,
-      sessionManager: module.SessionManager.inMemory(cwd),
-      settingsManager
-    })
-    return session
-  }
+  const timeoutMs = options.timeoutMs ?? TURN_MS
 
   return async (input) => {
-    const endpoint = await options.endpoint()
-    if (endpoint === null) {
+    const ready = await options.endpoint()
+    if (ready === null) {
       return { kind: 'needs_login' }
     }
-    const botId = input.prior.botId
-    let pending = sessions.get(botId)
-    if (pending === undefined) {
-      pending = openSession(botId, endpoint)
-      sessions.set(botId, pending)
-    }
-    let session: PrimeSession
-    try {
-      session = await pending
-    } catch (reason: unknown) {
-      sessions.delete(botId)
-      return failed(reason)
-    }
-    let streamed = ''
-    const unsubscribe = session.subscribe?.((event) => {
-      const delta = event.assistantMessageEvent
-      if (delta?.type === 'text_delta' && typeof delta.delta === 'string') {
-        streamed += delta.delta
-      }
+
+    let session: AgentSession | undefined
+    let rejectDeadline: ((reason: Error) => void) | undefined
+    const deadline = new Promise<never>((_, reject) => {
+      rejectDeadline = reject
     })
+    const timer = setTimeout(() => {
+      const error = new Error('timeout')
+      error.name = 'AbortError'
+      void session?.abort()
+      rejectDeadline?.(error)
+    }, timeoutMs)
+
+    const opened = openTurn(ready)
     try {
-      await session.prompt(input.ownerBody)
+      return await Promise.race([opened, deadline])
     } catch (reason: unknown) {
       return failed(reason)
     } finally {
-      unsubscribe?.()
+      clearTimeout(timer)
+      session?.dispose()
+      void opened.catch(() => undefined)
     }
-    if (streamed.trim().length > 0) {
-      return { kind: 'ok', body: streamed.trim() }
-    }
-    try {
+
+    async function openTurn(endpoint: Endpoint): Promise<TurnResult> {
+      const module = await load()
+      const cwd = primeWorkDir(options.home, input.prior.botId)
+      const agentDir = dirname(primeCatalogPath(options.home))
+      const modelsPath = primeCatalogPath(options.home)
+      await mkdir(cwd, { recursive: true })
+      await writeCatalog(modelsPath, endpoint)
+      const modelRuntime = await module.ModelRuntime.create({
+        authPath: join(agentDir, 'runtime-auth.json'),
+        modelsPath,
+        refreshOnCreate: false,
+        allowModelNetwork: false
+      })
+      await modelRuntime.setRuntimeApiKey('cohort', endpoint.key)
+      const model =
+        modelRuntime.getModel('cohort', endpoint.model) ??
+        modelRuntime.getModels().find((item) => item.id === endpoint.model)
+      if (model === undefined) {
+        return { kind: 'turn_failed', detail: 'turn failed' }
+      }
+      const settingsManager = module.SettingsManager.inMemory({
+        compaction: { enabled: false },
+        defaultTools: []
+      })
+      const resourceLoader = new module.DefaultResourceLoader({
+        cwd,
+        agentDir,
+        settingsManager,
+        noExtensions: true,
+        noSkills: true,
+        noPromptTemplates: true,
+        noThemes: true,
+        noContextFiles: true,
+        systemPrompt: HATCH_SYSTEM
+      })
+      await resourceLoader.reload()
+      const created = await module.createAgentSession({
+        cwd,
+        agentDir,
+        modelRuntime,
+        model,
+        thinkingLevel: 'minimal',
+        noTools: 'all',
+        resourceLoader,
+        sessionManager: module.SessionManager.inMemory(cwd),
+        settingsManager
+      })
+      session = created.session
+      if (input.prior.turns.length > 0) {
+        session.agent.state.messages = priorMessages(input.prior, endpoint.model)
+      }
+      let streamed = ''
+      const unsubscribe = session.subscribe((event) => {
+        streamed += streamedText(event)
+      })
+      try {
+        await session.prompt(input.ownerBody)
+      } finally {
+        unsubscribe()
+      }
+      if (streamed.trim().length > 0) {
+        return { kind: 'ok', body: streamed.trim() }
+      }
       return { kind: 'ok', body: assistantText(session.messages) }
-    } catch (reason: unknown) {
-      return failed(reason)
     }
   }
 }
