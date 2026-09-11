@@ -40,22 +40,29 @@ const emptyPrior = { botId: 'hatch' as const, turns: [] }
 function fakeModule(options?: {
   readonly reply?: string
   readonly prompt?: (text: string) => Promise<void>
+  readonly create?: () => Promise<void>
+  readonly assistant?: unknown
 }): {
   module: PrimeModule
   prompts: string[]
   seeded: unknown[]
   keys: string[]
+  aborted: number
   disposed: number
   opens: number
+  subscribed: number
 } {
   const prompts: string[] = []
   const seeded: unknown[] = []
   const keys: string[] = []
+  let aborted = 0
   let disposed = 0
   let opens = 0
+  let subscribed = 0
   const reply = options?.reply ?? 'hi from Hatch'
   const module = {
     createAgentSession: async () => {
+      if (options?.create) await options.create()
       opens += 1
       let messages: unknown[] = []
       return {
@@ -80,21 +87,29 @@ function fakeModule(options?: {
               await options.prompt(text)
               return
             }
-            messages.push({
-              role: 'assistant',
-              content: [{ type: 'text', text: reply }]
-            })
+            messages.push(
+              options?.assistant ?? {
+                role: 'assistant',
+                content: [{ type: 'text', text: reply }]
+              }
+            )
           },
-          subscribe: (listener: (event: { type: string; assistantMessageEvent?: { type: string; delta?: string } }) => void) => {
-            if (!options?.prompt) {
-              listener({
-                type: 'message_update',
-                assistantMessageEvent: { type: 'text_delta', delta: reply }
-              })
-            }
+          subscribe: (
+            listener: (event: {
+              type: string
+              assistantMessageEvent?: { type: string; delta?: string }
+            }) => void
+          ) => {
+            subscribed += 1
+            listener({
+              type: 'message_update',
+              assistantMessageEvent: { type: 'text_delta', delta: reply }
+            })
             return () => undefined
           },
-          abort: async () => undefined,
+          abort: async () => {
+            aborted += 1
+          },
           dispose: () => {
             disposed += 1
           }
@@ -128,11 +143,17 @@ function fakeModule(options?: {
     prompts,
     seeded,
     keys,
+    get aborted() {
+      return aborted
+    },
     get disposed() {
       return disposed
     },
     get opens() {
       return opens
+    },
+    get subscribed() {
+      return subscribed
     }
   }
 }
@@ -163,11 +184,11 @@ describe('assistantText', () => {
 describe('primeTurn', () => {
   it('prompts Prime and returns the assistant reply', async () => {
     const home = tempHome()
-    const { module, prompts, keys } = fakeModule()
+    const fake = fakeModule()
     const turn = primeTurn({
       home,
       endpoint: async () => endpoint,
-      load: async () => module
+      load: async () => fake.module
     })
     expect(
       await turn({
@@ -175,8 +196,9 @@ describe('primeTurn', () => {
         ownerBody: 'hello'
       })
     ).toEqual({ kind: 'ok', body: 'hi from Hatch' })
-    expect(prompts).toEqual(['hello'])
-    expect(keys).toEqual(['cohort:sk-test'])
+    expect(fake.prompts).toEqual(['hello'])
+    expect(fake.keys).toEqual(['cohort:sk-test'])
+    expect(fake.subscribed).toBe(0)
   })
 
   it('seeds prior turns into the session before the new prompt', async () => {
@@ -282,6 +304,28 @@ describe('primeTurn', () => {
     expect(JSON.stringify(result).includes('sk-test')).toBe(false)
   })
 
+  it('does not return ok from a partial stream when the final message errored', async () => {
+    const fake = fakeModule({
+      reply: 'partial from stream',
+      assistant: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'partial from stream' }],
+        stopReason: 'error',
+        errorMessage: 'sk-test provider boom'
+      }
+    })
+    const turn = primeTurn({
+      home: tempHome(),
+      endpoint: async () => endpoint,
+      load: async () => fake.module
+    })
+    const result = await turn({ prior: emptyPrior, ownerBody: 'hello' })
+    expect(result).toEqual({ kind: 'turn_failed', detail: 'turn failed' })
+    expect(JSON.stringify(result).includes('sk-test')).toBe(false)
+    expect(JSON.stringify(result).includes('partial from stream')).toBe(false)
+    expect(fake.subscribed).toBe(0)
+  })
+
   it('returns empty reply when the assistant has no text', async () => {
     const { module } = fakeModule({
       prompt: async () => undefined
@@ -295,6 +339,32 @@ describe('primeTurn', () => {
       kind: 'turn_failed',
       detail: 'empty reply'
     })
+  })
+
+  it('aborts and disposes a session created after the deadline', async () => {
+    let resume = (): void => undefined
+    const held = new Promise<void>((resolve) => {
+      resume = resolve
+    })
+    const fake = fakeModule({
+      create: () => held
+    })
+    const turn = primeTurn({
+      home: tempHome(),
+      endpoint: async () => endpoint,
+      load: async () => fake.module,
+      timeoutMs: 20
+    })
+    expect(await turn({ prior: emptyPrior, ownerBody: 'hello' })).toEqual({
+      kind: 'turn_failed',
+      detail: 'timeout'
+    })
+    expect(fake.opens).toBe(0)
+    expect(fake.disposed).toBe(0)
+    resume()
+    await expect.poll(() => fake.disposed).toBe(1)
+    expect(fake.opens).toBe(1)
+    expect(fake.aborted).toBe(1)
   })
 
   it('returns timeout when the prompt hangs past the deadline', async () => {
@@ -379,5 +449,8 @@ describe('prime kernel contract', () => {
     expect(source.includes('mergeCohortAuth')).toBe(false)
     expect(source.includes("apiKey: 'COHORT'")).toBe(false)
     expect(source.includes("from '@earendil-works/pi-coding-agent'")).toBe(true)
+    expect(source.includes('assistantText(session.messages)')).toBe(true)
+    expect(source.includes('streamedText')).toBe(false)
+    expect(source.includes('.subscribe(')).toBe(false)
   })
 })

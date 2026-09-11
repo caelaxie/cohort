@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent'
+import type { AgentSession } from '@earendil-works/pi-coding-agent'
 import type { Endpoint } from './kernel'
 import { HATCH_SYSTEM } from './hatch-prompt'
 import { primeWorkDir } from './paths'
@@ -24,6 +24,12 @@ function isAbort(reason: unknown): boolean {
     'name' in reason &&
     reason.name === 'AbortError'
   )
+}
+
+function timeoutError(): Error {
+  const error = new Error('timeout')
+  error.name = 'AbortError'
+  return error
 }
 
 function failed(reason: unknown): TurnResult {
@@ -95,15 +101,6 @@ function priorMessages(prior: Thread, model: string): PrimeMessage[] {
   return messages
 }
 
-function streamedText(event: AgentSessionEvent): string {
-  if (event.type !== 'message_update') return ''
-  const delta = event.assistantMessageEvent
-  if (delta.type === 'text_delta' && typeof delta.delta === 'string') {
-    return delta.delta
-  }
-  return ''
-}
-
 async function writeCatalog(modelsPath: string, endpoint: Endpoint): Promise<void> {
   const models = {
     providers: {
@@ -144,15 +141,15 @@ export function primeTurn(options: {
     }
 
     let session: AgentSession | undefined
+    let timedOut = false
     let rejectDeadline: ((reason: Error) => void) | undefined
     const deadline = new Promise<never>((_, reject) => {
       rejectDeadline = reject
     })
     const timer = setTimeout(() => {
-      const error = new Error('timeout')
-      error.name = 'AbortError'
+      timedOut = true
       void session?.abort()
-      rejectDeadline?.(error)
+      rejectDeadline?.(timeoutError())
     }, timeoutMs)
 
     const opened = openTurn(ready)
@@ -214,21 +211,16 @@ export function primeTurn(options: {
         settingsManager
       })
       session = created.session
+      if (timedOut) {
+        void session.abort()
+        session.dispose()
+        session = undefined
+        throw timeoutError()
+      }
       if (input.prior.turns.length > 0) {
         session.agent.state.messages = priorMessages(input.prior, endpoint.model)
       }
-      let streamed = ''
-      const unsubscribe = session.subscribe((event) => {
-        streamed += streamedText(event)
-      })
-      try {
-        await session.prompt(input.ownerBody)
-      } finally {
-        unsubscribe()
-      }
-      if (streamed.trim().length > 0) {
-        return { kind: 'ok', body: streamed.trim() }
-      }
+      await session.prompt(input.ownerBody)
       return { kind: 'ok', body: assistantText(session.messages) }
     }
   }
