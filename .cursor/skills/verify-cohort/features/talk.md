@@ -6,7 +6,7 @@ The Hatch pane is a teammate thread. The owner types in Message and clicks Send.
 
 - `composer` shows a Message field and a Send button on the Hatch pane.
 - `needs-login` keeps Send disabled until a model is connected and shows `Connect a model in Settings`.
-- `send-reply` posts the owner body and paints Hatch's reply from the connected completions endpoint.
+- `send-reply` posts the owner body and paints Hatch's reply from embedded Prime Agent.
 - `persist-reopen` keeps both messages after quit and relaunch against the same scratch home.
 
 ## How to get to it (user POV)
@@ -20,7 +20,7 @@ Preconditions:
 
 - Baseline preconditions from `README.md` hold.
 - Launch with `XAI_API_KEY`, `OPENAI_API_KEY`, and `ANTHROPIC_API_KEY` unset.
-- A mock OpenAI-compatible server is listening and `$RUN_ROOT/home/prime/agent/auth.json` contains `openai-completions` pointing at that server (`baseUrl`, `model`, `key`).
+- A mock OpenAI-compatible server is listening and `$RUN_ROOT/home/prime/agent/auth.json` contains `openai-completions` pointing at that server (`baseUrl`, `model`, `key`). Hatch's reply is produced by embedded Prime Agent using that same file.
 
 - **Composer.** After `doctor`, run `node .cursor/skills/verify-cohort/scripts/cohort-drive.mjs snapshot --port $PORT`. The snapshot shows `h1 "Hatch"`, a Message field, and a `Send` button. It does not show `Add files` or a `Files` rail.
 - **Needs login without a key.** If auth.json is missing, the Hatch pane includes `Connect a model in Settings`. Send stays disabled until Connect succeeds.
@@ -33,5 +33,5 @@ Preconditions:
 
 - `fill --label` needs Message inside a `<label>` that wraps the textarea.
 - Seed `$RUN_ROOT/home/prime/agent/auth.json`, not `~/.prime/agent/auth.json`.
-- The mock server must answer `POST /chat/completions` with `choices[0].message.content`.
+- The mock server must answer `POST /chat/completions` as an OpenAI SSE stream (`text/event-stream` with `finish_reason`). Prime Agent does not accept a single JSON body.
 - Bot roster `empty-thread` now expects a composer. Absence of a textarea is a regression.

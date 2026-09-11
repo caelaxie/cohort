@@ -10,9 +10,9 @@ import {
   type SendResult,
   type Thread
 } from '../shared/talk'
-import type { Turn } from './completions'
 import { openTalkDb, type TalkDb } from './db'
 import { turns } from './schema'
+import type { Turn } from './turn'
 
 export type TalkOptions = {
   readonly home: string

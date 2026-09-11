@@ -1,18 +1,6 @@
-import type { Thread } from '../shared/talk'
 import type { Endpoint } from './kernel'
-
-export type TurnResult =
-  | { readonly kind: 'ok'; readonly body: string }
-  | { readonly kind: 'needs_login' }
-  | { readonly kind: 'turn_failed'; readonly detail: string }
-
-export type Turn = (input: {
-  readonly prior: Thread
-  readonly ownerBody: string
-}) => Promise<TurnResult>
-
-const HATCH_SYSTEM =
-  'You are Hatch, the lead bot in Cohort, a crew of named AI teammates on this Mac. Reply as a teammate. Do not claim to have tools or a computer.'
+import { HATCH_SYSTEM } from './hatch-prompt'
+import type { Turn, TurnResult } from './turn'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
