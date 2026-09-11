@@ -1,5 +1,6 @@
 import { isRecord, rejectSecrets } from './parse'
 
+/** BYO endpoint only: ready is model + baseUrl. No Cohort-metered cap; secrets stay off status. */
 export type KernelStatus =
   | { readonly kind: 'needs_login' }
   | { readonly kind: 'ready'; readonly model: string; readonly baseUrl: string }

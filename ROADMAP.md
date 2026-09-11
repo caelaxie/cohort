@@ -21,7 +21,7 @@ Authority for v1 behavior: this file.
 - [x] Bots use the browser you are already logged into (one shared login)
 - [x] Ask first before send, post, buy, or delete. Only you approve
 - [x] Prime Agent embedded as the kernel (not the Prime CLI)
-- [ ] Bring your own model subscriptions; no Cohort weekly cap
+- [x] Bring your own model subscriptions; no Cohort weekly cap
 - [ ] Use it on a real job of your own
 
 ## v2 — More hands
