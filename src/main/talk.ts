@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { asc, eq } from 'drizzle-orm'
-import { parseBotId, type BotId } from '../shared/roster'
+import { CHIEF_ID, parseBotId, type BotId } from '../shared/roster'
 import {
   parseBody,
   parseMessageId,
   parseSendRequest,
   type ClosedTurn,
+  type Coordination,
+  type InterruptResult,
   type Line,
   type SendResult,
   type Thread
@@ -43,7 +45,10 @@ export class TalkStore {
   private readonly known: (id: BotId) => boolean
   private readonly now: () => number
   private readonly id: () => string
-  private readonly inFlight = new Set<string>()
+  private readonly inflight = new Map<
+    string,
+    { readonly brief: string; readonly abort: AbortController }
+  >()
 
   constructor(options: TalkOptions) {
     this.db = openTalkDb(options.home)
@@ -74,13 +79,14 @@ export class TalkStore {
     if (!this.known(request.botId)) {
       return { kind: 'unknown_bot' }
     }
-    if (this.inFlight.has(request.botId)) {
+    if (this.inflight.has(request.botId)) {
       return { kind: 'busy' }
     }
-    this.inFlight.add(request.botId)
+    const abort = new AbortController()
+    this.inflight.set(request.botId, { brief: parsed.body, abort })
     try {
       const prior: Thread = { botId: request.botId, turns: this.readTurns(request.botId) }
-      const result = await this.turn({ prior, ownerBody: parsed.body })
+      const result = await this.turn({ prior, ownerBody: parsed.body, signal: abort.signal })
       if (result.kind !== 'ok') {
         return result
       }
@@ -102,7 +108,37 @@ export class TalkStore {
         thread: { botId: request.botId, turns: [...prior.turns, closed] }
       }
     } finally {
-      this.inFlight.delete(request.botId)
+      this.inflight.delete(request.botId)
+    }
+  }
+
+  assign(input: unknown): Promise<SendResult> {
+    const request = parseSendRequest(input)
+    if (request.botId === CHIEF_ID) {
+      return Promise.resolve({ kind: 'not_teammate' })
+    }
+    return this.send(input)
+  }
+
+  interrupt(id: unknown): InterruptResult {
+    const botId = parseBotId(id)
+    if (!this.known(botId)) {
+      return { kind: 'unknown_bot' }
+    }
+    const running = this.inflight.get(botId)
+    if (!running) {
+      return { kind: 'idle' }
+    }
+    running.abort.abort()
+    return { kind: 'ok' }
+  }
+
+  coordination(): Coordination {
+    return {
+      running: [...this.inflight.entries()].map(([botId, { brief }]) => ({
+        botId: parseBotId(botId),
+        brief
+      }))
     }
   }
 

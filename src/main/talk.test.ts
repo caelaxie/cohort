@@ -1,10 +1,17 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
 import { CHIEF_ID, LEGACY_LEAD_ID, parseBotId } from '../shared/roster'
-import { BODY_MAX, parseSendResult, parseThread, sendCopy } from '../shared/talk'
+import {
+  BODY_MAX,
+  parseCoordination,
+  parseInterruptResult,
+  parseSendResult,
+  parseThread,
+  sendCopy
+} from '../shared/talk'
 import { botSystemPrompt } from './chief-prompt'
 import { RosterStore } from './roster'
 import type { Turn } from './turn'
@@ -492,5 +499,145 @@ describe('parseSendResult', () => {
     expect(() =>
       parseSendResult({ kind: 'ok', thread: { botId: 'chief', turns: [] }, key: 'sk' })
     ).toThrow('secret field')
+  })
+})
+
+describe('Chief coordination', () => {
+  it('assigns and steers a hatched bot on that bot thread', async () => {
+    const home = tempHome()
+    const roster = new RosterStore(home)
+    roster.hatch('Scout')
+    const talk = new TalkStore({
+      home,
+      known: (id) => roster.known(id),
+      turn: async ({ prior, ownerBody }) => ({
+        kind: 'ok',
+        body: `${prior.botId}:${ownerBody}`
+      }),
+      id: ids(),
+      now: () => 1
+    })
+    expect(await talk.assign({ botId: 'chief', body: 'plan the work' })).toEqual({
+      kind: 'not_teammate'
+    })
+    expect(await talk.assign({ botId: 'ghost', body: 'plan the work' })).toEqual({
+      kind: 'unknown_bot'
+    })
+    expect(talk.coordination()).toEqual({ running: [] })
+    expect(await talk.assign({ botId: 'scout', body: 'draft the outline' })).toEqual({
+      kind: 'ok',
+      thread: {
+        botId: 'scout',
+        turns: [
+          {
+            owner: { id: 'm1', body: 'draft the outline', createdAt: 1 },
+            bot: { id: 'm2', body: 'scout:draft the outline', createdAt: 1 }
+          }
+        ]
+      }
+    })
+    expect(await talk.assign({ botId: 'scout', body: 'tighten the intro' })).toEqual({
+      kind: 'ok',
+      thread: {
+        botId: 'scout',
+        turns: [
+          {
+            owner: { id: 'm1', body: 'draft the outline', createdAt: 1 },
+            bot: { id: 'm2', body: 'scout:draft the outline', createdAt: 1 }
+          },
+          {
+            owner: { id: 'm3', body: 'tighten the intro', createdAt: 1 },
+            bot: { id: 'm4', body: 'scout:tighten the intro', createdAt: 1 }
+          }
+        ]
+      }
+    })
+    expect(talk.thread('chief')).toEqual({ botId: 'chief', turns: [] })
+    expect(talk.coordination()).toEqual({ running: [] })
+    talk.close()
+    roster.close()
+  })
+
+  it('shows running coordination and interrupt writes nothing', async () => {
+    const home = tempHome()
+    const roster = new RosterStore(home)
+    roster.hatch('Scout')
+    let release: () => void = () => undefined
+    let started: () => void = () => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const began = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const talk = new TalkStore({
+      home,
+      known: (id) => roster.known(id),
+      turn: async ({ signal }) => {
+        started()
+        await new Promise<void>((resolve) => {
+          const done = (): void => resolve()
+          signal?.addEventListener('abort', done, { once: true })
+          void held.then(done)
+        })
+        if (signal?.aborted) return { kind: 'stopped' }
+        return { kind: 'ok', body: 'done' }
+      },
+      id: ids(),
+      now: () => 1
+    })
+    const assigned = talk.assign({ botId: 'scout', body: 'draft the outline' })
+    await began
+    expect(talk.coordination()).toEqual({
+      running: [{ botId: 'scout', brief: 'draft the outline' }]
+    })
+    expect(await talk.assign({ botId: 'scout', body: 'again' })).toEqual({ kind: 'busy' })
+    expect(talk.interrupt('ghost')).toEqual({ kind: 'unknown_bot' })
+    expect(talk.interrupt('chief')).toEqual({ kind: 'idle' })
+    expect(talk.interrupt('scout')).toEqual({ kind: 'ok' })
+    expect(await assigned).toEqual({ kind: 'stopped' })
+    expect(talk.thread('scout')).toEqual({ botId: 'scout', turns: [] })
+    expect(talk.coordination()).toEqual({ running: [] })
+    expect(talk.interrupt('scout')).toEqual({ kind: 'idle' })
+    release()
+    expect(sendCopy({ kind: 'stopped' }, 'Scout')).toBe('Stopped')
+    expect(sendCopy({ kind: 'not_teammate' }, 'Chief')).toBe('Chief assigns other bots')
+    talk.close()
+    roster.close()
+  })
+
+  it('does not invent a silent external side-effect API', async () => {
+    const home = tempHome()
+    const roster = new RosterStore(home)
+    roster.hatch('Scout')
+    const talk = new TalkStore({
+      home,
+      known: (id) => roster.known(id),
+      turn: reply('ok')
+    })
+    const storeKeys = Object.getOwnPropertyNames(Object.getPrototypeOf(talk))
+    expect(storeKeys.includes('assign')).toBe(true)
+    expect(storeKeys.includes('interrupt')).toBe(true)
+    expect(storeKeys.includes('coordination')).toBe(true)
+    expect(storeKeys.includes('post')).toBe(false)
+    expect(storeKeys.includes('buy')).toBe(false)
+    expect(storeKeys.includes('approve')).toBe(false)
+    const ipc = readFileSync(new URL('./ipc.ts', import.meta.url), 'utf8')
+    const api = readFileSync(new URL('../shared/cohort.ts', import.meta.url), 'utf8')
+    const prime = readFileSync(new URL('./prime.ts', import.meta.url), 'utf8')
+    for (const source of [ipc, api]) {
+      expect(source.includes('cohort:assign')).toBe(true)
+      expect(source.includes('cohort:interrupt')).toBe(true)
+      expect(source.includes('cohort:coordination')).toBe(true)
+      expect(source.includes('cohort:post')).toBe(false)
+      expect(source.includes('cohort:buy')).toBe(false)
+      expect(source.includes('cohort:approve')).toBe(false)
+    }
+    expect(prime.includes("noTools: 'all'")).toBe(true)
+    expect(prime.includes('defaultTools: []')).toBe(true)
+    expect(() => parseCoordination({ running: [], apiKey: 'sk' })).toThrow('secret field')
+    expect(() => parseInterruptResult({ kind: 'ok', key: 'sk' })).toThrow('secret field')
+    talk.close()
+    roster.close()
   })
 })

@@ -30,7 +30,21 @@ export type SendResult =
   | { readonly kind: 'empty' }
   | { readonly kind: 'too_long' }
   | { readonly kind: 'unknown_bot' }
+  | { readonly kind: 'not_teammate' }
+  | { readonly kind: 'stopped' }
   | { readonly kind: 'turn_failed'; readonly detail: string }
+
+export type Running = {
+  readonly botId: BotId
+  readonly brief: string
+}
+
+export type Coordination = {
+  readonly running: readonly Running[]
+}
+
+export type InterruptResult =
+  { readonly kind: 'ok' } | { readonly kind: 'idle' } | { readonly kind: 'unknown_bot' }
 
 export type PaintedLine = {
   readonly id: MessageId
@@ -132,7 +146,9 @@ export function parseSendResult(value: unknown): SendResult {
     value.kind === 'busy' ||
     value.kind === 'empty' ||
     value.kind === 'too_long' ||
-    value.kind === 'unknown_bot'
+    value.kind === 'unknown_bot' ||
+    value.kind === 'not_teammate' ||
+    value.kind === 'stopped'
   ) {
     return { kind: value.kind }
   }
@@ -182,7 +198,44 @@ export function sendCopy(result: Exclude<SendResult, { kind: 'ok' }>, botName: s
       return 'Message is too long'
     case 'unknown_bot':
       return 'Unknown bot'
+    case 'not_teammate':
+      return 'Chief assigns other bots'
+    case 'stopped':
+      return 'Stopped'
     case 'turn_failed':
       return result.detail
   }
+}
+
+export function parseCoordination(value: unknown): Coordination {
+  if (!isRecord(value)) {
+    throw new Error('invalid coordination')
+  }
+  rejectSecrets(value)
+  if (!Array.isArray(value.running)) {
+    throw new Error('invalid coordination')
+  }
+  return {
+    running: value.running.map((item) => {
+      if (!isRecord(item)) {
+        throw new Error('invalid running')
+      }
+      rejectSecrets(item)
+      if (typeof item.brief !== 'string') {
+        throw new Error('invalid running')
+      }
+      return { botId: parseBotId(item.botId), brief: item.brief }
+    })
+  }
+}
+
+export function parseInterruptResult(value: unknown): InterruptResult {
+  if (!isRecord(value)) {
+    throw new Error('invalid interrupt')
+  }
+  rejectSecrets(value)
+  if (value.kind === 'ok' || value.kind === 'idle' || value.kind === 'unknown_bot') {
+    return { kind: value.kind }
+  }
+  throw new Error('unknown kind')
 }

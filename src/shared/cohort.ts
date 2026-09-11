@@ -7,5 +7,8 @@ export type CohortApi = {
   connect: (input?: unknown) => Promise<unknown>
   thread: (botId: string) => Promise<unknown>
   send: (input: unknown) => Promise<unknown>
+  assign: (input: unknown) => Promise<unknown>
+  interrupt: (botId: string) => Promise<unknown>
+  coordination: () => Promise<unknown>
   onOpenSettings: (callback: () => void) => () => void
 }

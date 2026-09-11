@@ -407,6 +407,47 @@ describe('primeTurn', () => {
     expect(fake.aborted).toBe(1)
   })
 
+  it('returns stopped when the turn signal aborts', async () => {
+    const fake = fakeModule({
+      prompt: async () =>
+        new Promise(() => {
+          return
+        })
+    })
+    const turn = primeTurn({
+      bot: () => CHIEF,
+      home: tempHome(),
+      endpoint: async () => endpoint,
+      load: async () => fake.module
+    })
+    const abort = new AbortController()
+    const pending = turn({ prior: emptyPrior, ownerBody: 'hello', signal: abort.signal })
+    await expect.poll(() => fake.opens).toBe(1)
+    abort.abort()
+    expect(await pending).toEqual({ kind: 'stopped' })
+    expect(fake.aborted).toBe(1)
+    expect(fake.disposed).toBe(1)
+  })
+
+  it('returns stopped without loading Prime when already aborted', async () => {
+    let loaded = false
+    const abort = new AbortController()
+    abort.abort()
+    const turn = primeTurn({
+      bot: () => CHIEF,
+      home: tempHome(),
+      endpoint: async () => endpoint,
+      load: async () => {
+        loaded = true
+        return fakeModule().module
+      }
+    })
+    expect(await turn({ prior: emptyPrior, ownerBody: 'hello', signal: abort.signal })).toEqual({
+      kind: 'stopped'
+    })
+    expect(loaded).toBe(false)
+  })
+
   it('returns timeout when the prompt hangs past the deadline', async () => {
     const fake = fakeModule({
       prompt: async () =>

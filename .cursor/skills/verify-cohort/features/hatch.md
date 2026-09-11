@@ -32,6 +32,7 @@ Preconditions:
 ## Gotchas
 
 - Hatch is on the Chief pane, not the Crew sidebar. Click Chief before looking for the Name field.
+- After a teammate exists, Chief also shows To / Brief / Assign. That is coordination, not hatch.
 - Hatch does not need a connected model. Talk as the hatched bot does.
 - The mock reply body may still say `hi from Chief` if the server is the Talk to Chief fixture. Assert `bot_id` and the Scout speaker label, not the mock wording.
 - `fill --label` needs Name inside a `<label>` that wraps the input.

@@ -33,7 +33,16 @@ function timeoutError(): Error {
   return error
 }
 
-function failed(reason: unknown): TurnResult {
+function stoppedError(): Error {
+  const error = new Error('stopped')
+  error.name = 'AbortError'
+  return error
+}
+
+function failed(reason: unknown, stopped: boolean): TurnResult {
+  if (stopped) {
+    return { kind: 'stopped' }
+  }
   if (isAbort(reason)) {
     return { kind: 'turn_failed', detail: 'timeout' }
   }
@@ -137,6 +146,9 @@ export function primeTurn(options: {
   const timeoutMs = options.timeoutMs ?? TURN_MS
 
   return async (input) => {
+    if (input.signal?.aborted) {
+      return { kind: 'stopped' }
+    }
     const ready = await options.endpoint()
     if (ready === null) {
       return { kind: 'needs_login' }
@@ -144,10 +156,17 @@ export function primeTurn(options: {
 
     let session: AgentSession | undefined
     let timedOut = false
+    let stopped = false
     let rejectDeadline: ((reason: Error) => void) | undefined
     const deadline = new Promise<never>((_, reject) => {
       rejectDeadline = reject
     })
+    const onAbort = (): void => {
+      stopped = true
+      void session?.abort()
+      rejectDeadline?.(stoppedError())
+    }
+    input.signal?.addEventListener('abort', onAbort, { once: true })
     const timer = setTimeout(() => {
       timedOut = true
       void session?.abort()
@@ -158,9 +177,10 @@ export function primeTurn(options: {
     try {
       return await Promise.race([opened, deadline])
     } catch (reason: unknown) {
-      return failed(reason)
+      return failed(reason, stopped)
     } finally {
       clearTimeout(timer)
+      input.signal?.removeEventListener('abort', onAbort)
       session?.dispose()
       void opened.catch(() => undefined)
     }
@@ -213,11 +233,11 @@ export function primeTurn(options: {
         settingsManager
       })
       session = created.session
-      if (timedOut) {
+      if (timedOut || stopped) {
         void session.abort()
         session.dispose()
         session = undefined
-        throw timeoutError()
+        throw stopped ? stoppedError() : timeoutError()
       }
       if (input.prior.turns.length > 0) {
         session.agent.state.messages = priorMessages(input.prior, endpoint.model)

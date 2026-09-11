@@ -3,7 +3,19 @@ import { BotSidebar } from '@/components/bot-sidebar'
 import { BotMain } from '@/components/bot-main'
 import { SettingsPane } from '@/components/settings-pane'
 import { parseKernelStatus, type KernelStatus } from '../../shared/kernel'
-import { chiefOnlyRoster, parseRoster, viewWith, type HomeView } from '../../shared/roster'
+import {
+  chiefOnlyRoster,
+  parseBotId,
+  parseRoster,
+  viewWith,
+  type HomeView
+} from '../../shared/roster'
+import {
+  parseCoordination,
+  parseInterruptResult,
+  parseSendResult,
+  type Running
+} from '../../shared/talk'
 
 function fail(reason: unknown, fallback: string): string {
   return reason instanceof Error ? reason.message : fallback
@@ -18,6 +30,7 @@ function App(): React.JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [kernelStatus, setKernelStatus] = useState<KernelStatus>({ kind: 'needs_login' })
   const [kernelError, setKernelError] = useState<string | null>(null)
+  const [running, setRunning] = useState<readonly Running[]>([])
 
   useEffect(() => {
     if (!window.cohort) return
@@ -36,6 +49,10 @@ function App(): React.JSX.Element {
       .catch((reason: unknown) => {
         setKernelError(fail(reason, 'Could not load model'))
       })
+    void window.cohort
+      .coordination()
+      .then((raw) => setRunning(parseCoordination(raw).running))
+      .catch(() => undefined)
   }, [])
 
   useEffect(() => {
@@ -62,6 +79,7 @@ function App(): React.JSX.Element {
       <BotSidebar
         roster={view.roster}
         error={view.error}
+        running={running}
         settingsOpen={settingsOpen}
         kernelStatus={kernelStatus}
         onOpenSettings={() => {
@@ -82,6 +100,33 @@ function App(): React.JSX.Element {
           key={view.roster.current}
           roster={view.roster}
           kernelStatus={kernelStatus}
+          running={running}
+          onAssign={async (botId, brief) => {
+            setRunning((prev) => [
+              ...prev.filter((item) => item.botId !== botId),
+              { botId: parseBotId(botId), brief }
+            ])
+            try {
+              return parseSendResult(await window.cohort.assign({ botId, body: brief }))
+            } finally {
+              try {
+                setRunning(parseCoordination(await window.cohort.coordination()).running)
+              } catch {
+                setRunning((prev) => prev.filter((item) => item.botId !== botId))
+              }
+            }
+          }}
+          onInterrupt={async (botId) => {
+            try {
+              parseInterruptResult(await window.cohort.interrupt(botId))
+            } finally {
+              try {
+                setRunning(parseCoordination(await window.cohort.coordination()).running)
+              } catch {
+                setRunning((prev) => prev.filter((item) => item.botId !== botId))
+              }
+            }
+          }}
           onHatch={(name) => {
             void window.cohort
               .hatch(name)
@@ -93,7 +138,10 @@ function App(): React.JSX.Element {
           onRemove={(id) => {
             void window.cohort
               .remove(id)
-              .then((raw) => setView(viewWith(parseRoster(raw))))
+              .then((raw) => {
+                setView(viewWith(parseRoster(raw)))
+                setRunning((prev) => prev.filter((item) => item.botId !== id))
+              })
               .catch((reason: unknown) => {
                 setView((prev) => viewWith(prev.roster, fail(reason, 'Could not remove')))
               })

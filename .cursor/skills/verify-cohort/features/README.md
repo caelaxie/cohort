@@ -44,3 +44,4 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Model settings](./model-settings.md) covers the Settings footer, the Settings pane, Chief staying current, and connecting a model already on this Mac.
 - [Talk to Chief](./talk.md) covers sending a message on the Chief pane and seeing Chief's reply.
 - [Hatch a teammate](./hatch.md) covers naming a bot from Chief's pane, selecting it, talking as that bot, and removing it.
+- [Chief coordinates teammates](./coordinate.md) covers assigning a brief from Chief, seeing in-flight work, stopping it, and steering with a later assign.

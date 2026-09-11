@@ -1,10 +1,12 @@
 import { cn } from '@/lib/utils'
 import { rosterBots, type Roster } from '../../../shared/roster'
 import { readyForTalk, type KernelStatus } from '../../../shared/kernel'
+import type { Running } from '../../../shared/talk'
 
 type Props = {
   roster: Roster
   error: string | null
+  running: readonly Running[]
   onSelect: (id: string) => void
   settingsOpen: boolean
   kernelStatus: KernelStatus
@@ -17,11 +19,13 @@ const navButtonClass =
 export function BotSidebar({
   roster,
   error,
+  running,
   onSelect,
   settingsOpen,
   kernelStatus,
   onOpenSettings
 }: Props): React.JSX.Element {
+  const working = new Set(running.map((item) => item.botId))
   return (
     <aside className="flex w-[244px] shrink-0 flex-col border-r border-hairline bg-surface-1">
       <div className="flex h-14 items-center px-3">
@@ -50,6 +54,9 @@ export function BotSidebar({
                 onClick={() => onSelect(bot.id)}
               >
                 <span className="truncate">{bot.name}</span>
+                {working.has(bot.id) ? (
+                  <span className="ml-auto text-xs text-ink-subtle">working</span>
+                ) : null}
               </button>
             </li>
           )
