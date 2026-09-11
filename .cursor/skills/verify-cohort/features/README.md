@@ -45,3 +45,4 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Talk to Chief](./talk.md) covers sending a message on the Chief pane and seeing Chief's reply.
 - [Hatch a teammate](./hatch.md) covers naming a bot from Chief's pane, selecting it, talking as that bot, and removing it.
 - [Chief coordinates teammates](./coordinate.md) covers assigning a brief from Chief, seeing in-flight work, stopping it, and steering with a later assign.
+- [Shared room](./room.md) covers the Room pane, owner picking who answers, speaker identity per line, and 1:1 threads staying separate.

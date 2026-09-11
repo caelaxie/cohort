@@ -15,7 +15,7 @@ Authority for v1 behavior: this file.
 - [x] Talk to Chief and hatched bots as teammates
 - [x] Chief can hatch another named bot
 - [x] Chief can coordinate other bots
-- [ ] Shared room: you, Chief, and other bots in one thread
+- [x] Shared room: you, Chief, and other bots in one thread
 - [ ] This Mac is the computer while Cohort is open
 - [ ] Closing Cohort stops the bots
 - [ ] Bots use the browser you are already logged into (one shared login)

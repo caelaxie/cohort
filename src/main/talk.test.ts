@@ -1,6 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
 import { CHIEF_ID, LEGACY_LEAD_ID, parseBotId } from '../shared/roster'
@@ -14,38 +12,15 @@ import {
 } from '../shared/talk'
 import { botSystemPrompt } from './chief-prompt'
 import { RosterStore } from './roster'
-import type { Turn } from './turn'
 import { openTalkDb } from './db'
 import { stateDbPath, talkDbPath } from './paths'
 import { turns } from './schema'
 import { TalkStore } from './talk'
+import { chiefKnown, ids, reply, talkHomes } from './talk-test-util'
 
-const homes: string[] = []
+const { tempHome, cleanup } = talkHomes()
 
-function tempHome(): string {
-  const home = mkdtempSync(join(tmpdir(), 'cohort-talk-'))
-  homes.push(home)
-  return home
-}
-
-function ids(): () => string {
-  let n = 0
-  return () => `m${++n}`
-}
-
-function chiefKnown(id: string): boolean {
-  return id === CHIEF_ID
-}
-
-function reply(body: string): Turn {
-  return async () => ({ kind: 'ok', body })
-}
-
-afterEach(() => {
-  for (const dir of homes.splice(0)) {
-    rmSync(dir, { recursive: true, force: true })
-  }
-})
+afterEach(cleanup)
 
 describe('TalkStore', () => {
   it('starts with an empty Chief thread', () => {
@@ -475,7 +450,7 @@ describe('TalkStore', () => {
       const names = db
         .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`)
         .all() as { name: string }[]
-      expect(names).toEqual([{ name: 'turns' }])
+      expect(names).toEqual([{ name: 'room_lines' }, { name: 'turns' }])
     } finally {
       db.close()
     }
@@ -652,6 +627,8 @@ describe('Chief coordination', () => {
     expect(storeKeys.includes('assign')).toBe(true)
     expect(storeKeys.includes('interrupt')).toBe(true)
     expect(storeKeys.includes('coordination')).toBe(true)
+    expect(storeKeys.includes('room')).toBe(true)
+    expect(storeKeys.includes('roomSend')).toBe(true)
     expect(storeKeys.includes('post')).toBe(false)
     expect(storeKeys.includes('buy')).toBe(false)
     expect(storeKeys.includes('approve')).toBe(false)
@@ -661,9 +638,13 @@ describe('Chief coordination', () => {
     expect(ipc.includes('cohort:assign')).toBe(true)
     expect(ipc.includes('cohort:interrupt')).toBe(true)
     expect(ipc.includes('cohort:coordination')).toBe(true)
+    expect(ipc.includes('cohort:room')).toBe(true)
+    expect(ipc.includes('cohort:room-send')).toBe(true)
     expect(api.includes('assign:')).toBe(true)
     expect(api.includes('interrupt:')).toBe(true)
     expect(api.includes('coordination:')).toBe(true)
+    expect(api.includes('room:')).toBe(true)
+    expect(api.includes('roomSend:')).toBe(true)
     for (const source of [ipc, api]) {
       expect(source.includes('cohort:post')).toBe(false)
       expect(source.includes('cohort:buy')).toBe(false)

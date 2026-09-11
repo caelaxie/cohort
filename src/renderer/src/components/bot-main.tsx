@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react'
-import { readyForTalk, type KernelStatus } from '../../../shared/kernel'
+import type { KernelStatus } from '../../../shared/kernel'
 import { CHIEF_ID, currentBot, rosterBots, type Roster } from '../../../shared/roster'
 import {
   emptyThread,
   paint,
   parseSendResult,
   parseThread,
-  sendCopy,
   type Running,
   type SendResult,
   type Thread
 } from '../../../shared/talk'
 import { ChiefAssign } from './chief-assign'
+import { useTalkSend } from '@/lib/use-talk-send'
+import { TalkComposer } from './talk-composer'
 import { WorkingStatus } from './working-status'
 
 type Props = {
@@ -39,10 +40,11 @@ export function BotMain({
 }: Props): React.JSX.Element {
   const bot = currentBot(roster)
   const [thread, setThread] = useState<Thread>(() => emptyThread(bot.id))
-  const [draft, setDraft] = useState('')
   const [hatchName, setHatchName] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [sendError, setSendError] = useState<string | null>(null)
+  const { draft, setDraft, busy, sendError, setSendError, canSend, send, stop } = useTalkSend({
+    kernelStatus,
+    nameFor: () => bot.name
+  })
 
   useEffect(() => {
     if (!window.cohort) return
@@ -58,27 +60,8 @@ export function BotMain({
     return () => {
       cancelled = true
     }
-  }, [bot.id])
+  }, [bot.id, setSendError])
 
-  async function onSend(): Promise<void> {
-    setBusy(true)
-    setSendError(null)
-    try {
-      const result = parseSendResult(await window.cohort.send({ botId: bot.id, body: draft }))
-      if (result.kind === 'ok') {
-        setThread(result.thread)
-        setDraft('')
-        return
-      }
-      setSendError(sendCopy(result, bot.name))
-    } catch (reason: unknown) {
-      setSendError(fail(reason, 'Could not send'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const canSend = readyForTalk(kernelStatus) && !busy
   const lines = paint(thread)
   const thisRunning = running.find((item) => item.botId === bot.id)
   const teammatesRunning = running.filter((item) => item.botId !== CHIEF_ID)
@@ -180,50 +163,25 @@ export function BotMain({
         ))}
       </ul>
 
-      <form
-        className="shrink-0 border-t border-hairline px-6 py-4"
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!canSend) return
-          void onSend()
+      <TalkComposer
+        kernelStatus={kernelStatus}
+        draft={draft}
+        busy={busy}
+        canSend={canSend}
+        sendError={sendError}
+        showStop={busy || thisRunning !== undefined}
+        onDraftChange={setDraft}
+        onSend={() => {
+          void send(bot.id, async (body) => {
+            const result = parseSendResult(await window.cohort.send({ botId: bot.id, body }))
+            if (result.kind === 'ok') setThread(result.thread)
+            return result
+          })
         }}
-      >
-        {kernelStatus.kind === 'needs_login' ? (
-          <p className="mb-3 text-sm text-ink-muted">Connect a model in Settings</p>
-        ) : null}
-        <label className="flex min-w-0 flex-col gap-1.5 text-sm text-ink">
-          Message
-          <textarea
-            value={draft}
-            disabled={busy}
-            className="min-h-16 rounded-md border border-hairline bg-canvas px-3 py-2 text-sm text-ink"
-            onChange={(event) => {
-              setDraft(event.target.value)
-            }}
-          />
-        </label>
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          <button
-            type="submit"
-            disabled={!canSend}
-            className="rounded-md bg-primary px-3.5 py-2 text-sm font-medium text-on-primary hover:bg-primary-hover disabled:opacity-50"
-          >
-            Send
-          </button>
-          {busy || thisRunning ? (
-            <WorkingStatus
-              onStop={() => {
-                void onInterrupt(bot.id)
-              }}
-            />
-          ) : null}
-        </div>
-        {sendError ? (
-          <p className="mt-3 text-sm text-danger" role="alert">
-            {sendError}
-          </p>
-        ) : null}
-      </form>
+        onStop={() => {
+          stop(onInterrupt, bot.id)
+        }}
+      />
     </section>
   )
 }

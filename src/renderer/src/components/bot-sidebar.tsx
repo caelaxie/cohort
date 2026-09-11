@@ -8,8 +8,10 @@ type Props = {
   error: string | null
   running: readonly Running[]
   onSelect: (id: string) => void
+  roomOpen: boolean
   settingsOpen: boolean
   kernelStatus: KernelStatus
+  onOpenRoom: () => void
   onOpenSettings: () => void
 }
 
@@ -21,8 +23,10 @@ export function BotSidebar({
   error,
   running,
   onSelect,
+  roomOpen,
   settingsOpen,
   kernelStatus,
+  onOpenRoom,
   onOpenSettings
 }: Props): React.JSX.Element {
   const working = new Set(running.map((item) => item.botId))
@@ -43,8 +47,18 @@ export function BotSidebar({
       ) : null}
 
       <ul className="flex flex-1 flex-col gap-0.5 overflow-auto px-2 pb-3">
+        <li>
+          <button
+            type="button"
+            aria-current={roomOpen && !settingsOpen ? 'page' : undefined}
+            className={cn(navButtonClass, roomOpen && !settingsOpen && 'bg-surface-2 text-ink')}
+            onClick={onOpenRoom}
+          >
+            <span className="truncate">Room</span>
+          </button>
+        </li>
         {rosterBots(roster).map((bot) => {
-          const current = !settingsOpen && bot.id === roster.current
+          const current = !settingsOpen && !roomOpen && bot.id === roster.current
           return (
             <li key={bot.id}>
               <button

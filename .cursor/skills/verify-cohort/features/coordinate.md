@@ -33,5 +33,5 @@ Preconditions:
 
 - Assign is on the Chief pane, after Hatch. Click Chief after hatching.
 - Assign needs a connected model. Stop does not.
-- Do not look for a shared room. The work lives on the teammate's own thread.
+- Assign is not the shared room. The work still lives on the teammate's own thread. Room is a separate Crew item.
 - There is no Post, Buy, or Approve button. Remove is roster-only.
