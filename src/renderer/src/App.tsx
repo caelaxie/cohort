@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { BotSidebar } from '@/components/bot-sidebar'
 import { BotMain } from '@/components/bot-main'
+import { RoomMain } from '@/components/room-main'
 import { SettingsPane } from '@/components/settings-pane'
 import { parseKernelStatus, type KernelStatus } from '../../shared/kernel'
 import {
@@ -13,6 +14,7 @@ import {
 import {
   parseCoordination,
   parseInterruptResult,
+  parseRoomSendResult,
   parseSendResult,
   type Running
 } from '../../shared/talk'
@@ -28,6 +30,7 @@ function App(): React.JSX.Element {
       : viewWith(chiefOnlyRoster(), 'The app bridge is missing. Restart Cohort.')
   )
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [roomOpen, setRoomOpen] = useState(false)
   const [kernelStatus, setKernelStatus] = useState<KernelStatus>({ kind: 'needs_login' })
   const [kernelError, setKernelError] = useState<string | null>(null)
   const [running, setRunning] = useState<readonly Running[]>([])
@@ -80,13 +83,19 @@ function App(): React.JSX.Element {
         roster={view.roster}
         error={view.error}
         running={running}
+        roomOpen={roomOpen}
         settingsOpen={settingsOpen}
         kernelStatus={kernelStatus}
+        onOpenRoom={() => {
+          setSettingsOpen(false)
+          setRoomOpen(true)
+        }}
         onOpenSettings={() => {
           setSettingsOpen(true)
         }}
         onSelect={(id) => {
           setSettingsOpen(false)
+          setRoomOpen(false)
           void window.cohort
             .select(id)
             .then((raw) => setView(viewWith(parseRoster(raw))))
@@ -96,57 +105,91 @@ function App(): React.JSX.Element {
         }}
       />
       <div className={settingsOpen ? 'hidden min-w-0 flex-1' : 'flex min-w-0 flex-1'}>
-        <BotMain
-          key={view.roster.current}
-          roster={view.roster}
-          kernelStatus={kernelStatus}
-          running={running}
-          onAssign={async (botId, brief) => {
-            setRunning((prev) => [
-              ...prev.filter((item) => item.botId !== botId),
-              { botId: parseBotId(botId), brief }
-            ])
-            try {
-              return parseSendResult(await window.cohort.assign({ botId, body: brief }))
-            } finally {
+        {roomOpen ? (
+          <RoomMain
+            roster={view.roster}
+            kernelStatus={kernelStatus}
+            running={running}
+            onRoomSend={async (botId, body) => {
+              setRunning((prev) => [
+                ...prev.filter((item) => item.botId !== botId),
+                { botId: parseBotId(botId), brief: body }
+              ])
               try {
-                setRunning(parseCoordination(await window.cohort.coordination()).running)
-              } catch {
-                setRunning((prev) => prev.filter((item) => item.botId !== botId))
+                return parseRoomSendResult(await window.cohort.roomSend({ botId, body }))
+              } finally {
+                try {
+                  setRunning(parseCoordination(await window.cohort.coordination()).running)
+                } catch {
+                  setRunning((prev) => prev.filter((item) => item.botId !== botId))
+                }
               }
-            }
-          }}
-          onInterrupt={async (botId) => {
-            try {
-              parseInterruptResult(await window.cohort.interrupt(botId))
-            } finally {
+            }}
+            onInterrupt={async (botId) => {
               try {
-                setRunning(parseCoordination(await window.cohort.coordination()).running)
-              } catch {
-                setRunning((prev) => prev.filter((item) => item.botId !== botId))
+                parseInterruptResult(await window.cohort.interrupt(botId))
+              } finally {
+                try {
+                  setRunning(parseCoordination(await window.cohort.coordination()).running)
+                } catch {
+                  setRunning((prev) => prev.filter((item) => item.botId !== botId))
+                }
               }
-            }
-          }}
-          onHatch={(name) => {
-            void window.cohort
-              .hatch(name)
-              .then((raw) => setView(viewWith(parseRoster(raw))))
-              .catch((reason: unknown) => {
-                setView((prev) => viewWith(prev.roster, fail(reason, 'Could not hatch')))
-              })
-          }}
-          onRemove={(id) => {
-            void window.cohort
-              .remove(id)
-              .then((raw) => {
-                setView(viewWith(parseRoster(raw)))
-                setRunning((prev) => prev.filter((item) => item.botId !== id))
-              })
-              .catch((reason: unknown) => {
-                setView((prev) => viewWith(prev.roster, fail(reason, 'Could not remove')))
-              })
-          }}
-        />
+            }}
+          />
+        ) : (
+          <BotMain
+            key={view.roster.current}
+            roster={view.roster}
+            kernelStatus={kernelStatus}
+            running={running}
+            onAssign={async (botId, brief) => {
+              setRunning((prev) => [
+                ...prev.filter((item) => item.botId !== botId),
+                { botId: parseBotId(botId), brief }
+              ])
+              try {
+                return parseSendResult(await window.cohort.assign({ botId, body: brief }))
+              } finally {
+                try {
+                  setRunning(parseCoordination(await window.cohort.coordination()).running)
+                } catch {
+                  setRunning((prev) => prev.filter((item) => item.botId !== botId))
+                }
+              }
+            }}
+            onInterrupt={async (botId) => {
+              try {
+                parseInterruptResult(await window.cohort.interrupt(botId))
+              } finally {
+                try {
+                  setRunning(parseCoordination(await window.cohort.coordination()).running)
+                } catch {
+                  setRunning((prev) => prev.filter((item) => item.botId !== botId))
+                }
+              }
+            }}
+            onHatch={(name) => {
+              void window.cohort
+                .hatch(name)
+                .then((raw) => setView(viewWith(parseRoster(raw))))
+                .catch((reason: unknown) => {
+                  setView((prev) => viewWith(prev.roster, fail(reason, 'Could not hatch')))
+                })
+            }}
+            onRemove={(id) => {
+              void window.cohort
+                .remove(id)
+                .then((raw) => {
+                  setView(viewWith(parseRoster(raw)))
+                  setRunning((prev) => prev.filter((item) => item.botId !== id))
+                })
+                .catch((reason: unknown) => {
+                  setView((prev) => viewWith(prev.roster, fail(reason, 'Could not remove')))
+                })
+            }}
+          />
+        )}
       </div>
       {settingsOpen ? (
         <SettingsPane

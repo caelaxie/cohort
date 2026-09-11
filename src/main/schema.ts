@@ -19,5 +19,14 @@ export const turns = sqliteTable('turns', {
   createdAt: integer('created_at').notNull()
 })
 
+export const roomLines = sqliteTable('room_lines', {
+  n: integer('n').primaryKey(),
+  id: text('id').notNull().unique(),
+  speakerKind: text('speaker_kind').notNull(),
+  speakerBotId: text('speaker_bot_id'),
+  body: text('body').notNull(),
+  createdAt: integer('created_at').notNull()
+})
+
 export const schema = { teammates, meta }
-export const talkSchema = { turns }
+export const talkSchema = { turns, roomLines }

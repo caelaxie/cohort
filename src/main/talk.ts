@@ -1,19 +1,23 @@
 import { randomUUID } from 'node:crypto'
-import { asc, eq } from 'drizzle-orm'
+import { asc, desc, eq } from 'drizzle-orm'
 import { CHIEF_ID, parseBotId, type BotId } from '../shared/roster'
 import {
   parseBody,
   parseMessageId,
   parseSendRequest,
+  roomTurnBody,
   type ClosedTurn,
   type Coordination,
   type InterruptResult,
   type Line,
+  type Room,
+  type RoomLine,
+  type RoomSendResult,
   type SendResult,
   type Thread
 } from '../shared/talk'
 import { openTalkDb, type TalkDb } from './db'
-import { turns } from './schema'
+import { roomLines, turns } from './schema'
 import type { Turn } from './turn'
 
 export type TalkOptions = {
@@ -49,6 +53,7 @@ export class TalkStore {
     string,
     { readonly brief: string; readonly abort: AbortController }
   >()
+  private roomFlight: BotId | null = null
 
   constructor(options: TalkOptions) {
     this.db = openTalkDb(options.home)
@@ -68,6 +73,10 @@ export class TalkStore {
       throw new Error('unknown bot')
     }
     return { botId, turns: this.readTurns(botId) }
+  }
+
+  room(): Room {
+    return { lines: this.readRoomLines() }
   }
 
   async send(input: unknown): Promise<SendResult> {
@@ -112,6 +121,55 @@ export class TalkStore {
       }
     } finally {
       this.inflight.delete(request.botId)
+    }
+  }
+
+  async roomSend(input: unknown): Promise<RoomSendResult> {
+    const request = parseSendRequest(input)
+    const parsed = parseBody(request.body)
+    if (parsed.kind !== 'ok') {
+      return parsed
+    }
+    if (!this.known(request.botId)) {
+      return { kind: 'unknown_bot' }
+    }
+    if (this.roomFlight !== null || this.inflight.has(request.botId)) {
+      return { kind: 'busy' }
+    }
+    const abort = new AbortController()
+    this.roomFlight = request.botId
+    this.inflight.set(request.botId, { brief: parsed.body, abort })
+    try {
+      const prior = this.readRoomLines()
+      const result = await this.turn({
+        prior: { botId: request.botId, turns: [] },
+        ownerBody: roomTurnBody(prior, parsed.body),
+        signal: abort.signal
+      })
+      if (result.kind !== 'ok') {
+        return result
+      }
+      if (abort.signal.aborted) {
+        return { kind: 'stopped' }
+      }
+      const createdAt = this.now()
+      const owner: RoomLine = {
+        id: parseMessageId(this.id()),
+        speaker: { kind: 'owner' },
+        body: parsed.body,
+        createdAt
+      }
+      const bot: RoomLine = {
+        id: parseMessageId(this.id()),
+        speaker: { kind: 'bot', botId: request.botId },
+        body: result.body,
+        createdAt
+      }
+      this.insertRoomLines([owner, bot])
+      return { kind: 'ok', room: { lines: [...prior, owner, bot] } }
+    } finally {
+      this.inflight.delete(request.botId)
+      this.roomFlight = null
     }
   }
 
@@ -167,5 +225,58 @@ export class TalkStore {
         createdAt: turn.owner.createdAt
       })
       .run()
+  }
+
+  private readRoomLines(): RoomLine[] {
+    return this.db.select().from(roomLines).orderBy(asc(roomLines.n)).all().map(toRoomLine)
+  }
+
+  private insertRoomLines(lines: readonly RoomLine[]): void {
+    let n = this.nextRoomN()
+    this.db.transaction((tx) => {
+      for (const line of lines) {
+        tx.insert(roomLines)
+          .values({
+            n,
+            id: line.id,
+            speakerKind: line.speaker.kind,
+            speakerBotId: line.speaker.kind === 'bot' ? line.speaker.botId : null,
+            body: line.body,
+            createdAt: line.createdAt
+          })
+          .run()
+        n += 1
+      }
+    })
+  }
+
+  private nextRoomN(): number {
+    const last = this.db
+      .select({ n: roomLines.n })
+      .from(roomLines)
+      .orderBy(desc(roomLines.n))
+      .limit(1)
+      .get()
+    return (last?.n ?? 0) + 1
+  }
+}
+
+function toRoomLine(row: typeof roomLines.$inferSelect): RoomLine {
+  if (row.speakerKind === 'owner') {
+    return {
+      id: parseMessageId(row.id),
+      speaker: { kind: 'owner' },
+      body: row.body,
+      createdAt: row.createdAt
+    }
+  }
+  if (row.speakerKind !== 'bot' || row.speakerBotId === null) {
+    throw new Error('invalid room line')
+  }
+  return {
+    id: parseMessageId(row.id),
+    speaker: { kind: 'bot', botId: parseBotId(row.speakerBotId) },
+    body: row.body,
+    createdAt: row.createdAt
   }
 }

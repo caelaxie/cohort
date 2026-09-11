@@ -52,6 +52,23 @@ export type PaintedLine = {
   readonly body: string
 }
 
+export type RoomSpeaker =
+  { readonly kind: 'owner' } | { readonly kind: 'bot'; readonly botId: BotId }
+
+export type RoomLine = {
+  readonly id: MessageId
+  readonly speaker: RoomSpeaker
+  readonly body: string
+  readonly createdAt: number
+}
+
+export type Room = {
+  readonly lines: readonly RoomLine[]
+}
+
+export type RoomSendResult =
+  { readonly kind: 'ok'; readonly room: Room } | Exclude<SendResult, { kind: 'ok' }>
+
 export const BODY_MAX = 16_000
 
 const SECRET_FIELDS = ['key', 'apiKey', 'token', 'secret', 'access', 'password'] as const
@@ -70,6 +87,20 @@ function rejectSecrets(value: Record<string, unknown>): void {
 
 export function emptyThread(botId: BotId): Thread {
   return { botId, turns: [] }
+}
+
+export function emptyRoom(): Room {
+  return { lines: [] }
+}
+
+export function roomSpeakerKey(speaker: RoomSpeaker): string {
+  return speaker.kind === 'owner' ? 'owner' : speaker.botId
+}
+
+export function roomTurnBody(prior: readonly RoomLine[], body: string): string {
+  if (prior.length === 0) return body
+  const transcript = prior.map((line) => `${roomSpeakerKey(line.speaker)}: ${line.body}`).join('\n')
+  return `${transcript}\nowner: ${body}`
 }
 
 export function parseMessageId(value: unknown): MessageId {
@@ -236,6 +267,76 @@ export function parseInterruptResult(value: unknown): InterruptResult {
   rejectSecrets(value)
   if (value.kind === 'ok' || value.kind === 'idle' || value.kind === 'unknown_bot') {
     return { kind: value.kind }
+  }
+  throw new Error('unknown kind')
+}
+
+export function parseRoomSpeaker(value: unknown): RoomSpeaker {
+  if (!isRecord(value)) {
+    throw new Error('invalid speaker')
+  }
+  if (value.kind === 'owner') {
+    return { kind: 'owner' }
+  }
+  if (value.kind === 'bot') {
+    return { kind: 'bot', botId: parseBotId(value.botId) }
+  }
+  throw new Error('invalid speaker')
+}
+
+export function parseRoomLine(value: unknown): RoomLine {
+  if (!isRecord(value)) {
+    throw new Error('invalid room line')
+  }
+  if (typeof value.body !== 'string') {
+    throw new Error('invalid room line')
+  }
+  if (typeof value.createdAt !== 'number' || !Number.isFinite(value.createdAt)) {
+    throw new Error('invalid room line')
+  }
+  return {
+    id: parseMessageId(value.id),
+    speaker: parseRoomSpeaker(value.speaker),
+    body: value.body,
+    createdAt: value.createdAt
+  }
+}
+
+export function parseRoom(value: unknown): Room {
+  if (!isRecord(value)) {
+    throw new Error('invalid room')
+  }
+  rejectSecrets(value)
+  if (!Array.isArray(value.lines)) {
+    throw new Error('invalid room')
+  }
+  return { lines: value.lines.map(parseRoomLine) }
+}
+
+export function parseRoomSendResult(value: unknown): RoomSendResult {
+  if (!isRecord(value)) {
+    throw new Error('invalid room send result')
+  }
+  rejectSecrets(value)
+  if (value.kind === 'ok') {
+    return { kind: 'ok', room: parseRoom(value.room) }
+  }
+  if (
+    value.kind === 'needs_login' ||
+    value.kind === 'busy' ||
+    value.kind === 'empty' ||
+    value.kind === 'too_long' ||
+    value.kind === 'unknown_bot' ||
+    value.kind === 'not_teammate' ||
+    value.kind === 'stopped'
+  ) {
+    return { kind: value.kind }
+  }
+  if (value.kind === 'turn_failed') {
+    if (typeof value.detail !== 'string' || value.detail.length === 0) {
+      throw new Error('invalid room send result')
+    }
+    return { kind: 'turn_failed', detail: value.detail }
   }
   throw new Error('unknown kind')
 }

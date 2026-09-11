@@ -47,6 +47,14 @@ export function openTalkDb(home: string): TalkDb {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS turns_bot_created ON turns (bot_id, created_at, owner_id);
+    CREATE TABLE IF NOT EXISTS room_lines (
+      n INTEGER PRIMARY KEY,
+      id TEXT NOT NULL UNIQUE,
+      speaker_kind TEXT NOT NULL,
+      speaker_bot_id TEXT,
+      body TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
   `)
   migrateLegacyLeadBotId(client)
   return drizzle({ client, schema: talkSchema })
