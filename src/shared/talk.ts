@@ -103,6 +103,10 @@ export function roomTurnBody(prior: readonly RoomLine[], body: string): string {
   return `${transcript}\nowner: ${body}`
 }
 
+export function talkStopTarget(flightBotId: string | null, fallback: string): string {
+  return flightBotId ?? fallback
+}
+
 export function parseMessageId(value: unknown): MessageId {
   if (typeof value !== 'string' || value.length === 0) {
     throw new Error('invalid message id')
