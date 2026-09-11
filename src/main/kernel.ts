@@ -79,22 +79,31 @@ function parseConnectRequest(input: unknown): ConnectRequest {
   }
 }
 
-function envPresent(env: NodeJS.Dict<string>, name: string): boolean {
+export type Endpoint = {
+  readonly model: string
+  readonly baseUrl: string
+  readonly key: string
+}
+
+function envKey(env: NodeJS.Dict<string>, name: string): string | null {
   const value = env[name]
-  return typeof value === 'string' && value.trim().length > 0
-}
-
-function fileKeyPresent(records: Record<string, unknown>, fileKey: string): boolean {
-  const entry = records[fileKey]
-  if (!isRecord(entry) || entry.type !== 'api_key' || typeof entry.key !== 'string') {
-    return false
+  if (typeof value !== 'string') {
+    return null
   }
-  return entry.key.trim().length > 0
+  const key = value.trim()
+  return key.length > 0 ? key : null
 }
 
-function completionsRecord(
-  value: unknown
-): { readonly model: string; readonly baseUrl: string } | null {
+function fileKey(records: Record<string, unknown>, name: string): string | null {
+  const entry = records[name]
+  if (!isRecord(entry) || entry.type !== 'api_key' || typeof entry.key !== 'string') {
+    return null
+  }
+  const key = entry.key.trim()
+  return key.length > 0 ? key : null
+}
+
+function completionsEndpoint(value: unknown): Endpoint | null {
   if (!isRecord(value) || typeof value.key !== 'string' || value.key.trim().length === 0) {
     return null
   }
@@ -102,7 +111,11 @@ function completionsRecord(
     return null
   }
   try {
-    return { model: value.model.trim(), baseUrl: parseBaseUrl(value.baseUrl) }
+    return {
+      model: value.model.trim(),
+      baseUrl: parseBaseUrl(value.baseUrl),
+      key: value.key.trim()
+    }
   } catch {
     return null
   }
@@ -121,13 +134,18 @@ export class Kernel {
     this.primeAuthPath = options.primeAuthPath
   }
 
-  status(): Promise<KernelStatus> {
-    return this.probe()
+  async status(): Promise<KernelStatus> {
+    const endpoint = await this.resolve()
+    return endpoint === null ? { kind: 'needs_login' } : ready(endpoint.model, endpoint.baseUrl)
+  }
+
+  endpoint(): Promise<Endpoint | null> {
+    return this.resolve()
   }
 
   async connect(input?: unknown): Promise<KernelStatus> {
     const request = parseConnectRequest(input)
-    return request.kind === 'probe' ? this.probe() : this.paste(request)
+    return request.kind === 'probe' ? this.status() : this.paste(request)
   }
 
   private async paste(request: Extract<ConnectRequest, { kind: 'paste' }>): Promise<KernelStatus> {
@@ -148,23 +166,27 @@ export class Kernel {
       mode: 0o600
     })
     await chmod(this.primeAuthPath, 0o600)
-    return this.probe()
+    return this.status()
   }
 
-  private async probe(): Promise<KernelStatus> {
+  private async resolve(): Promise<Endpoint | null> {
     const file = await this.readAuth()
     const records = file.kind === 'parsed' ? file.records : {}
-    const custom = completionsRecord(records[COMPLETIONS_RECORD])
+    const custom = completionsEndpoint(records[COMPLETIONS_RECORD])
     if (custom) {
-      return ready(custom.model, custom.baseUrl)
+      return custom
     }
     for (const preset of ENDPOINT_PRESETS) {
-      const fromFile = file.kind === 'parsed' && fileKeyPresent(records, preset.fileKey)
-      if (fromFile || envPresent(this.env, preset.env)) {
-        return ready(preset.model, preset.baseUrl)
+      const fromFile = file.kind === 'parsed' ? fileKey(records, preset.fileKey) : null
+      if (fromFile) {
+        return { model: preset.model, baseUrl: preset.baseUrl, key: fromFile }
+      }
+      const fromEnv = envKey(this.env, preset.env)
+      if (fromEnv) {
+        return { model: preset.model, baseUrl: preset.baseUrl, key: fromEnv }
       }
     }
-    return { kind: 'needs_login' }
+    return null
   }
 
   private async readAuth(): Promise<AuthFile> {
