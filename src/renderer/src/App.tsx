@@ -3,7 +3,7 @@ import { BotSidebar } from '@/components/bot-sidebar'
 import { BotMain } from '@/components/bot-main'
 import { SettingsPane } from '@/components/settings-pane'
 import { parseKernelStatus, type KernelStatus } from '../../shared/kernel'
-import { hatchOnlyRoster, parseRoster, viewWith, type HomeView } from '../../shared/roster'
+import { chiefOnlyRoster, parseRoster, viewWith, type HomeView } from '../../shared/roster'
 
 function fail(reason: unknown, fallback: string): string {
   return reason instanceof Error ? reason.message : fallback
@@ -12,8 +12,8 @@ function fail(reason: unknown, fallback: string): string {
 function App(): React.JSX.Element {
   const [view, setView] = useState<HomeView>(() =>
     window.cohort
-      ? viewWith(hatchOnlyRoster())
-      : viewWith(hatchOnlyRoster(), 'The app bridge is missing. Restart Cohort.')
+      ? viewWith(chiefOnlyRoster())
+      : viewWith(chiefOnlyRoster(), 'The app bridge is missing. Restart Cohort.')
   )
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [kernelStatus, setKernelStatus] = useState<KernelStatus>({ kind: 'needs_login' })

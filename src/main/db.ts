@@ -37,6 +37,7 @@ export function openTalkDb(home: string): TalkDb {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS turns_bot_created ON turns (bot_id, created_at, owner_id);
+    UPDATE turns SET bot_id = 'chief' WHERE bot_id = 'hatch';
   `)
   return drizzle({ client, schema: talkSchema })
 }

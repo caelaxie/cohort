@@ -35,7 +35,7 @@ const endpoint: Endpoint = {
   key: 'sk-test'
 }
 
-const emptyPrior = { botId: 'hatch' as const, turns: [] }
+const emptyPrior = { botId: 'chief' as const, turns: [] }
 
 function fakeModule(options?: {
   readonly reply?: string
@@ -59,7 +59,7 @@ function fakeModule(options?: {
   let disposed = 0
   let opens = 0
   let subscribed = 0
-  const reply = options?.reply ?? 'hi from Hatch'
+  const reply = options?.reply ?? 'hi from Chief'
   const module = {
     createAgentSession: async () => {
       if (options?.create) await options.create()
@@ -163,9 +163,9 @@ describe('assistantText', () => {
     expect(
       assistantText([
         { role: 'user', content: 'hello' },
-        { role: 'assistant', content: [{ type: 'text', text: ' hi from Hatch ' }] }
+        { role: 'assistant', content: [{ type: 'text', text: ' hi from Chief ' }] }
       ])
-    ).toBe('hi from Hatch')
+    ).toBe('hi from Chief')
   })
 
   it('does not throw a provider errorMessage', () => {
@@ -195,7 +195,7 @@ describe('primeTurn', () => {
         prior: emptyPrior,
         ownerBody: 'hello'
       })
-    ).toEqual({ kind: 'ok', body: 'hi from Hatch' })
+    ).toEqual({ kind: 'ok', body: 'hi from Chief' })
     expect(fake.prompts).toEqual(['hello'])
     expect(fake.keys).toEqual(['cohort:sk-test'])
     expect(fake.subscribed).toBe(0)
@@ -210,7 +210,7 @@ describe('primeTurn', () => {
     })
     await turn({
       prior: {
-        botId: 'hatch',
+        botId: 'chief',
         turns: [
           {
             owner: { id: parseMessageId('m1'), body: 'one', createdAt: 1 },
@@ -400,7 +400,7 @@ describe('primeTurn', () => {
         }
         res.writeHead(200, { 'Content-Type': 'text/event-stream' })
         res.write(
-          'data: {"choices":[{"delta":{"content":"hi from Hatch"},"finish_reason":null}]}\n\n'
+          'data: {"choices":[{"delta":{"content":"hi from Chief"},"finish_reason":null}]}\n\n'
         )
         res.write('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n')
         res.write('data: [DONE]\n\n')
@@ -426,7 +426,7 @@ describe('primeTurn', () => {
             prior: emptyPrior,
             ownerBody: 'hello'
           })
-        ).toEqual({ kind: 'ok', body: 'hi from Hatch' })
+        ).toEqual({ kind: 'ok', body: 'hi from Chief' })
         const catalog = JSON.parse(readFileSync(primeCatalogPath(home), 'utf8')) as {
           providers: { cohort: Record<string, unknown> }
         }

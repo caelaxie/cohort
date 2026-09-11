@@ -164,7 +164,7 @@ async function main() {
           ok: true,
           page: { title: page.title, url: page.url },
           bridge: true,
-          hatch: { id: state.hatch.id, name: state.hatch.name },
+          chief: { id: state.chief.id, name: state.chief.name },
           current: state.current
         }
         console.log(JSON.stringify(report, null, 2))

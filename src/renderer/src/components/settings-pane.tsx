@@ -46,7 +46,7 @@ export function SettingsPane({ status, error, onConnect }: Props): React.JSX.Ele
         <article className="max-w-xl rounded-lg border border-hairline bg-surface-1 p-6">
           <h2 className="font-display text-lg font-medium tracking-[-0.2px] text-ink">Model</h2>
           <p className="mt-2 text-sm text-ink-muted">
-            Hatch uses an OpenAI-compatible chat completions endpoint. Cohort does not meter a
+            Chief uses an OpenAI-compatible chat completions endpoint. Cohort does not meter a
             weekly cap.
           </p>
           {ready ? (
