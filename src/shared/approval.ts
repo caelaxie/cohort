@@ -1,3 +1,4 @@
+import { isRecord, rejectSecrets } from './parse'
 import { parseBotId, type BotId } from './roster'
 
 export const ACTION_CLASSES = ['send', 'post', 'buy', 'delete'] as const
@@ -40,20 +41,6 @@ export type Approvals = {
 
 export type DecideResult =
   { readonly kind: 'ok'; readonly approvals: Approvals } | { readonly kind: 'unknown' }
-
-const SECRET_FIELDS = ['key', 'apiKey', 'token', 'secret', 'access', 'password'] as const
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function rejectSecrets(value: Record<string, unknown>): void {
-  for (const field of SECRET_FIELDS) {
-    if (field in value) {
-      throw new Error('secret field')
-    }
-  }
-}
 
 export function parseApprovalId(value: unknown): ApprovalId {
   if (typeof value !== 'string' || value.length === 0) {

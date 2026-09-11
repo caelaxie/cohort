@@ -1,3 +1,4 @@
+import { isRecord, rejectSecrets } from './parse'
 import { parseBotId, type BotId } from './roster'
 
 export type MessageId = string & { readonly __brand: 'MessageId' }
@@ -70,20 +71,6 @@ export type RoomSendResult =
   { readonly kind: 'ok'; readonly room: Room } | Exclude<SendResult, { kind: 'ok' }>
 
 export const BODY_MAX = 16_000
-
-const SECRET_FIELDS = ['key', 'apiKey', 'token', 'secret', 'access', 'password'] as const
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function rejectSecrets(value: Record<string, unknown>): void {
-  for (const field of SECRET_FIELDS) {
-    if (field in value) {
-      throw new Error('secret field')
-    }
-  }
-}
 
 export function emptyThread(botId: BotId): Thread {
   return { botId, turns: [] }

@@ -46,9 +46,7 @@ export class ApprovalStore {
   }
 
   close(): void {
-    for (const request of this.readPending()) {
-      this.finish(request, 'denied')
-    }
+    this.denyPending()
     this.db.$client.close()
   }
 
@@ -103,14 +101,9 @@ export class ApprovalStore {
   }
 
   denyAll(): Approvals {
-    const pending = this.readPending()
-    if (pending.length === 0) {
-      return this.snapshot()
+    if (this.denyPending().length > 0) {
+      this.onChange?.()
     }
-    for (const request of pending) {
-      this.finish(request, 'denied')
-    }
-    this.onChange?.()
     return this.snapshot()
   }
 
@@ -128,10 +121,36 @@ export class ApprovalStore {
     return this.readPending().find((item) => item.id === id)
   }
 
+  private denyPending(): PendingApproval[] {
+    const pending = this.readPending()
+    if (pending.length === 0) {
+      return pending
+    }
+    this.db.transaction((tx) => {
+      for (const request of pending) {
+        this.persist(tx, request, 'denied')
+      }
+    })
+    for (const request of pending) {
+      this.settle(request, 'denied')
+    }
+    return pending
+  }
+
   private finish(request: PendingApproval, decision: ApprovalDecision): void {
-    this.db.delete(pendingApprovals).where(eq(pendingApprovals.id, request.id)).run()
-    this.db
-      .insert(approvalAudit)
+    this.db.transaction((tx) => {
+      this.persist(tx, request, decision)
+    })
+    this.settle(request, decision)
+  }
+
+  private persist(
+    db: Pick<ApprovalDb, 'delete' | 'insert'>,
+    request: PendingApproval,
+    decision: ApprovalDecision
+  ): void {
+    db.delete(pendingApprovals).where(eq(pendingApprovals.id, request.id)).run()
+    db.insert(approvalAudit)
       .values({
         id: this.id(),
         requestId: request.id,
@@ -144,7 +163,6 @@ export class ApprovalStore {
         decidedAt: this.now()
       })
       .run()
-    this.settle(request, decision)
   }
 
   private wait(id: string): Promise<ApprovalVerdict> {
