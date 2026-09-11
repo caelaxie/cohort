@@ -157,6 +157,40 @@ describe('Kernel', () => {
     expect(() => statSync(authPath)).toThrow()
   })
 
+  it('endpoint returns the env key and status JSON still has no key', async () => {
+    const kernel = new Kernel({
+      env: { XAI_API_KEY: 'sk-env' },
+      primeAuthPath: join(tempDir(), 'auth.json')
+    })
+    expect(await kernel.endpoint()).toEqual({
+      model: 'grok-4.5',
+      baseUrl: 'https://api.x.ai/v1',
+      key: 'sk-env'
+    })
+    expect(JSON.stringify(await kernel.status()).includes('"key"')).toBe(false)
+  })
+
+  it('endpoint is null when status is needs_login', async () => {
+    const kernel = new Kernel({ env: {}, primeAuthPath: join(tempDir(), 'auth.json') })
+    expect(await kernel.endpoint()).toBeNull()
+    expect(await kernel.status()).toEqual({ kind: 'needs_login' })
+  })
+
+  it('endpoint returns the pasted openai-completions key', async () => {
+    const kernel = new Kernel({ env: {}, primeAuthPath: join(tempDir(), 'auth.json') })
+    await kernel.connect({
+      kind: 'paste',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      model: 'llama3.1:8b',
+      secret: 'sk'
+    })
+    expect(await kernel.endpoint()).toEqual({
+      model: 'llama3.1:8b',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      key: 'sk'
+    })
+  })
+
   it('connect does not delete a sibling xai key', async () => {
     const authPath = join(tempDir(), 'auth.json')
     writeFileSync(authPath, JSON.stringify({ xai: { type: 'api_key', key: 'sk-file' } }), 'utf8')

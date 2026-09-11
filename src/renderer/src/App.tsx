@@ -77,6 +77,9 @@ function App(): React.JSX.Element {
             })
         }}
       />
+      <div className={settingsOpen ? 'hidden min-w-0 flex-1' : 'flex min-w-0 flex-1'}>
+        <BotMain key={view.roster.current} roster={view.roster} kernelStatus={kernelStatus} />
+      </div>
       {settingsOpen ? (
         <SettingsPane
           status={kernelStatus}
@@ -92,9 +95,7 @@ function App(): React.JSX.Element {
             }
           }}
         />
-      ) : (
-        <BotMain roster={view.roster} />
-      )}
+      ) : null}
     </div>
   )
 }

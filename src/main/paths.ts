@@ -8,3 +8,7 @@ export function defaultCohortHome(): string {
 export function stateDbPath(home: string): string {
   return join(home, 'state.sqlite')
 }
+
+export function talkDbPath(home: string): string {
+  return join(home, 'talk.sqlite')
+}

@@ -1,9 +1,11 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { ipcMain } from 'electron'
+import { completionsTurn } from './completions'
 import { Kernel } from './kernel'
 import { defaultCohortHome } from './paths'
 import { RosterStore } from './roster'
+import { TalkStore } from './talk'
 
 export function registerIpc(): { quit: () => Promise<void> } {
   const home = process.env.COHORT_HOME ?? defaultCohortHome()
@@ -14,14 +16,22 @@ export function registerIpc(): { quit: () => Promise<void> } {
       ? join(home, 'prime', 'agent', 'auth.json')
       : join(homedir(), '.prime', 'agent', 'auth.json')
   })
+  const talk = new TalkStore({
+    home,
+    known: (id) => store.known(id),
+    turn: completionsTurn({ endpoint: () => kernel.endpoint() })
+  })
 
   ipcMain.handle('cohort:home', () => store.load())
   ipcMain.handle('cohort:select', (_event, id: unknown) => store.select(id))
   ipcMain.handle('cohort:kernel', () => kernel.status())
   ipcMain.handle('cohort:connect', (_event, input: unknown) => kernel.connect(input))
+  ipcMain.handle('cohort:thread', (_event, id: unknown) => talk.thread(id))
+  ipcMain.handle('cohort:send', (_event, input: unknown) => talk.send(input))
 
   return {
     quit: async () => {
+      talk.close()
       store.close()
     }
   }

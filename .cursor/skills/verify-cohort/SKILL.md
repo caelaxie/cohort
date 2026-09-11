@@ -5,7 +5,7 @@ description: Drive the real Cohort desktop app (Electron + React) to prove user-
 
 # Verify Cohort
 
-Cohort is an Electron desktop app (macOS): one window, React renderer, named-bot roster in the left sidebar under Crew, Hatch as the lead bot, and an empty thread in the main pane. State lives in `$COHORT_HOME` (SQLite). Hatch is a compile-time identity, not a sqlite row.
+Cohort is an Electron desktop app (macOS): one window, React renderer, named-bot roster in the left sidebar under Crew, Hatch as the lead bot, and a Hatch thread with a Message composer in the main pane. State lives in `$COHORT_HOME` (SQLite). Hatch is a compile-time identity, not a sqlite row.
 
 This skill launches a throwaway instance, drives it over the Chrome DevTools Protocol, and captures proof. It never touches the user's real `~/.cohort` data or any other Electron app on this Mac.
 
@@ -94,6 +94,7 @@ Proof artifacts go in `$RUN_ROOT/evidence/` and survive cleanup. For every featu
 2. `state --path "$RUN_ROOT/evidence/<step>.json"` after mutations.
 3. Side effects outside the UI:
    - Roster DB: `sqlite3 "$RUN_ROOT/home/state.sqlite" "SELECT key, value FROM meta; SELECT id, name FROM teammates;"`.
+   - Talk DB: `sqlite3 "$RUN_ROOT/home/talk.sqlite" "SELECT owner_body, bot_body FROM turns ORDER BY created_at, owner_id;"`.
    - Kernel auth when `COHORT_HOME` is set: `$RUN_ROOT/home/prime/agent/auth.json`. Never the owner's `~/.prime/agent/auth.json`.
 4. Name artifacts after the feature and step, e.g. `bot-roster/after.png`.
 

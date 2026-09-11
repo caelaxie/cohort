@@ -40,5 +40,6 @@ Keep implementation details out of the map. Name only user paths, stable handles
 
 ## Features
 
-- [Bot roster](./bot-roster.md) covers Hatch on launch, the Crew heading, an empty Hatch thread, persistence across reopen, and clicking Hatch staying current.
+- [Bot roster](./bot-roster.md) covers Hatch on launch, the Crew heading, an empty Hatch thread with a Message composer, persistence across reopen, and clicking Hatch staying current.
 - [Model settings](./model-settings.md) covers the Settings footer, the Settings pane, Hatch staying current, and connecting a model already on this Mac.
+- [Talk to Hatch](./talk.md) covers sending a message on the Hatch pane and seeing Hatch's reply.

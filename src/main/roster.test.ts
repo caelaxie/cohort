@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
-import { parseRoster } from '../shared/roster'
+import { parseBotId, parseRoster } from '../shared/roster'
 import { stateDbPath } from './paths'
 import { RosterStore } from './roster'
 
@@ -42,6 +42,8 @@ describe('RosterStore', () => {
   it('loads Hatch only', () => {
     const store = new RosterStore(tempHome())
     expect(store.load()).toEqual(hatchRoster())
+    expect(store.known('hatch')).toBe(true)
+    expect(store.known(parseBotId('ghost'))).toBe(false)
     store.close()
   })
 

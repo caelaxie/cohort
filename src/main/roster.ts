@@ -35,6 +35,10 @@ export class RosterStore {
     return { hatch: HATCH, others, current }
   }
 
+  known(id: BotId): boolean {
+    return this.knownIds(this.readOthers()).has(id)
+  }
+
   select(id: unknown): Roster {
     const botId = parseBotId(id)
     const others = this.readOthers()
