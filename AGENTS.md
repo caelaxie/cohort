@@ -15,4 +15,5 @@ A computer-use driver is the hands, not the kernel.
 - Requirements live in `ROADMAP.md`.
 - `docs/archive` is history, not a run queue.
 - Do not add users, cloud, or a knowledge base while v1 is open.
+- Owners bring their own model subscriptions (kernel `auth.json`). Do not add a Cohort weekly cap or treat Cohort as a model vendor.
 - Prefer the smallest change that keeps the roadmap.

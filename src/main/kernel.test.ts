@@ -2,15 +2,30 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { parseKernelStatus } from '../shared/kernel'
+import { parseKernelStatus, type KernelStatus } from '../shared/kernel'
+import { SECRET_FIELDS } from '../shared/parse'
 import { Kernel } from './kernel'
 
 const homes: string[] = []
+
+const METER_FIELDS = ['cap', 'quota', 'credits', 'weekly', 'subscription'] as const
 
 function tempDir(): string {
   const dir = mkdtempSync(join(tmpdir(), 'cohort-kernel-'))
   homes.push(dir)
   return dir
+}
+
+function expectByoStatus(status: KernelStatus): void {
+  if (status.kind === 'needs_login') {
+    expect(Object.keys(status)).toEqual(['kind'])
+  } else {
+    expect(Object.keys(status).sort()).toEqual(['baseUrl', 'kind', 'model'])
+  }
+  const serialized = JSON.stringify(status)
+  for (const field of [...SECRET_FIELDS, ...METER_FIELDS]) {
+    expect(serialized.includes(`"${field}"`)).toBe(false)
+  }
 }
 
 afterEach(() => {
@@ -211,6 +226,20 @@ describe('Kernel', () => {
       key: 'sk-file'
     })
   })
+
+  it('status and connect never expose a Cohort cap or secrets', async () => {
+    const kernel = new Kernel({ env: {}, primeAuthPath: join(tempDir(), 'auth.json') })
+    expectByoStatus(await kernel.status())
+    expectByoStatus(await kernel.connect({ kind: 'probe' }))
+    expectByoStatus(
+      await kernel.connect({
+        kind: 'paste',
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        model: 'llama3.1:8b',
+        secret: 'sk-secret'
+      })
+    )
+  })
 })
 
 describe('parseKernelStatus', () => {
@@ -227,5 +256,24 @@ describe('parseKernelStatus', () => {
         apiKey: 'sk'
       })
     ).toThrow()
+  })
+
+  it('drops a smuggled weekly cap and keeps secrets off the wire', () => {
+    const status = parseKernelStatus({
+      kind: 'ready',
+      model: 'grok-4.5',
+      baseUrl: 'https://api.x.ai/v1',
+      cap: 100,
+      weekly: true,
+      quota: 'unlimited',
+      credits: 0,
+      subscription: 'cohort'
+    })
+    expectByoStatus(status)
+    expect(status).toEqual({
+      kind: 'ready',
+      model: 'grok-4.5',
+      baseUrl: 'https://api.x.ai/v1'
+    })
   })
 })

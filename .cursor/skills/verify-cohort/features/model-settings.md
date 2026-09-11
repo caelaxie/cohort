@@ -1,6 +1,6 @@
 # Model settings
 
-Settings is a sidebar footer, not a bot. It opens a Settings pane where Chief can use an OpenAI-compatible chat completions endpoint already on this Mac. Launch still shows Chief. Cohort does not meter a weekly cap.
+Settings is a sidebar footer, not a bot. It opens a Settings pane where the owner connects their own OpenAI-compatible chat completions endpoint. Launch still shows Chief. Cohort does not meter a weekly cap.
 
 ## Sub-features
 
@@ -28,7 +28,7 @@ Preconditions:
 - **Launch stays Chief.** After `doctor`, run `node .cursor/skills/verify-cohort/scripts/cohort-drive.mjs snapshot --port $PORT`. The snapshot shows `h2 "Crew"`, a Chief button with `aria-current="page"`, `h1 "Chief"`, and a `Settings` button. It does not show `h1 "Settings"`.
 - **Open Settings.** Run `... click --port $PORT --text "Settings"`, then `... wait --port $PORT --js "document.querySelector('h1')?.textContent === 'Settings'"`. The `h1` reads `Settings`. Run `... eval --port $PORT --js "document.querySelector('[aria-current=\"page\"]')?.textContent"`. It prints `"Settings"`. The Chief row does not have `aria-current`.
 - **Cmd+comma.** Click `Chief` so the `h1` is `Chief`. Run `... eval --port $PORT --js "window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', metaKey: true, bubbles: true, cancelable: true }))"`, then `... wait --port $PORT --js "document.querySelector('h1')?.textContent === 'Settings'"`. The `h1` reads `Settings`. `home()` `current` stays `chief`.
-- **Settings copy.** The snapshot includes `h2 "Model"` and the paragraph `Chief uses an OpenAI-compatible chat completions endpoint. Cohort does not meter a weekly cap.` It also includes the probe button `Use a key already on this Mac` and the labels `Base URL`, `Model`, and `API key`. It does not include three vendor Connect buttons.
+- **Settings copy.** The snapshot includes `h2 "Model"` and the paragraph `Connect your own OpenAI-compatible chat completions endpoint. Cohort does not meter a weekly cap.` It also includes the probe button `Use a key already on this Mac` and the labels `Base URL`, `Model`, and `API key`. It does not include three vendor Connect buttons.
 - **Probe without a key.** Run `... click --port $PORT --text "Use a key already on this Mac"`, then `... wait --port $PORT --js "[...document.querySelectorAll('p')].some(p => p.textContent === 'No model connected')"`. Status stays `No model connected`.
 - **Paste connect.** Run `... fill --port $PORT --label "Base URL" --value "http://127.0.0.1:11434/v1"`, then `... fill --port $PORT --label "Model" --value "llama3.1:8b"`, then `... fill --port $PORT --label "API key" --value "sk-test"`, then `... click --port $PORT --text "Connect"`. Wait until a `p` reads `llama3.1:8b`. Then outside the UI: `cat "$RUN_ROOT/home/prime/agent/auth.json"` contains `"openai-completions"` and `"http://127.0.0.1:11434/v1"`. The owner's `~/.prime/agent/auth.json` is not this file.
 - **Settings is not a bot.** Run `... state --port $PORT --path "$RUN_ROOT/evidence/model-settings/state.json"`. `current` is `chief`, `chief.name` is `Chief`, and `others` is `[]`. `sqlite3 "$RUN_ROOT/home/state.sqlite" "SELECT value FROM meta WHERE key='current_id';"` is still `chief`.
