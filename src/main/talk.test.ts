@@ -5,7 +5,10 @@ import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
 import { HATCH_ID } from '../shared/roster'
 import { BODY_MAX, parseSendResult, parseThread } from '../shared/talk'
+import type { Turn } from './completions'
+import { openTalkDb } from './db'
 import { stateDbPath, talkDbPath } from './paths'
+import { turns } from './schema'
 import { TalkStore } from './talk'
 
 const homes: string[] = []
@@ -25,6 +28,10 @@ function hatchKnown(id: string): boolean {
   return id === HATCH_ID
 }
 
+function reply(body: string): Turn {
+  return async () => ({ kind: 'ok', body })
+}
+
 afterEach(() => {
   for (const dir of homes.splice(0)) {
     rmSync(dir, { recursive: true, force: true })
@@ -36,7 +43,7 @@ describe('TalkStore', () => {
     const talk = new TalkStore({
       home: tempHome(),
       known: hatchKnown,
-      turn: async () => 'unused'
+      turn: reply('unused')
     })
     expect(talk.thread('hatch')).toEqual({ botId: 'hatch', turns: [] })
     talk.close()
@@ -47,7 +54,7 @@ describe('TalkStore', () => {
     const talk = new TalkStore({
       home,
       known: hatchKnown,
-      turn: async () => 'hi from Hatch',
+      turn: reply('hi from Hatch'),
       id: ids(),
       now: () => 1
     })
@@ -67,7 +74,7 @@ describe('TalkStore', () => {
     const reopened = new TalkStore({
       home,
       known: hatchKnown,
-      turn: async () => 'unused'
+      turn: reply('unused')
     })
     expect(reopened.thread('hatch')).toEqual({
       botId: 'hatch',
@@ -88,7 +95,7 @@ describe('TalkStore', () => {
     const talk = new TalkStore({
       home,
       known: hatchKnown,
-      turn: async () => 'hi from Hatch',
+      turn: reply('hi from Hatch'),
       id: () => seq[i++],
       now: () => 1
     })
@@ -97,7 +104,7 @@ describe('TalkStore', () => {
     const reopened = new TalkStore({
       home,
       known: hatchKnown,
-      turn: async () => 'unused'
+      turn: reply('unused')
     })
     expect(reopened.thread('hatch').turns[0]).toEqual({
       owner: { id: 'z-owner', body: 'hello', createdAt: 1 },
@@ -110,7 +117,7 @@ describe('TalkStore', () => {
     const talk = new TalkStore({
       home: tempHome(),
       known: hatchKnown,
-      turn: async ({ ownerBody }) => `re:${ownerBody}`,
+      turn: async ({ ownerBody }) => ({ kind: 'ok', body: `re:${ownerBody}` }),
       id: ids(),
       now: () => 1
     })
@@ -151,7 +158,7 @@ describe('TalkStore', () => {
         calls += 1
         started()
         await held
-        return 'done'
+        return { kind: 'ok', body: 'done' }
       },
       id: ids(),
       now: () => 1
@@ -181,7 +188,7 @@ describe('TalkStore', () => {
     const talk = new TalkStore({
       home,
       known: hatchKnown,
-      turn: async () => 'nope'
+      turn: reply('nope')
     })
     expect(await talk.send({ botId: 'hatch', body: '   ' })).toEqual({ kind: 'empty' })
     expect(talk.thread('hatch')).toEqual({ botId: 'hatch', turns: [] })
@@ -193,7 +200,7 @@ describe('TalkStore', () => {
     const talk = new TalkStore({
       home: tempHome(),
       known: hatchKnown,
-      turn: async () => 'nope'
+      turn: reply('nope')
     })
     expect(await talk.send({ botId: 'hatch', body: 'x'.repeat(BODY_MAX + 1) })).toEqual({
       kind: 'too_long'
@@ -206,9 +213,7 @@ describe('TalkStore', () => {
     const talk = new TalkStore({
       home: tempHome(),
       known: hatchKnown,
-      turn: async () => {
-        throw new Error('needs_login')
-      }
+      turn: async () => ({ kind: 'needs_login' })
     })
     expect(await talk.send({ botId: 'hatch', body: 'hello' })).toEqual({ kind: 'needs_login' })
     expect(talk.thread('hatch').turns).toEqual([])
@@ -221,8 +226,8 @@ describe('TalkStore', () => {
       home: tempHome(),
       known: hatchKnown,
       turn: async () => {
-        if (fail) throw new Error('timeout')
-        return 'ok'
+        if (fail) return { kind: 'turn_failed', detail: 'timeout' }
+        return { kind: 'ok', body: 'ok' }
       },
       id: ids(),
       now: () => 1
@@ -248,29 +253,52 @@ describe('TalkStore', () => {
     talk.close()
   })
 
-  it('blank turn reply is turn_failed and writes nothing', async () => {
-    const talk = new TalkStore({
-      home: tempHome(),
-      known: hatchKnown,
-      turn: async () => '  '
-    })
-    expect(await talk.send({ botId: 'hatch', body: 'hello' })).toEqual({
-      kind: 'turn_failed',
-      detail: 'empty reply'
-    })
-    expect(talk.thread('hatch').turns).toEqual([])
-    talk.close()
-  })
-
   it('unknown bot send returns unknown_bot and thread throws', async () => {
     const talk = new TalkStore({
       home: tempHome(),
       known: hatchKnown,
-      turn: async () => 'nope'
+      turn: reply('nope')
     })
     expect(await talk.send({ botId: 'ghost', body: 'hello' })).toEqual({ kind: 'unknown_bot' })
     expect(() => talk.thread('ghost')).toThrow('unknown bot')
     talk.close()
+  })
+
+  it('stores one drizzle row per closed turn', async () => {
+    const home = tempHome()
+    const talk = new TalkStore({
+      home,
+      known: hatchKnown,
+      turn: reply('hi from Hatch'),
+      id: ids(),
+      now: () => 1
+    })
+    await talk.send({ botId: 'hatch', body: 'hello' })
+    await talk.send({ botId: 'hatch', body: 'again' })
+    talk.close()
+    const db = openTalkDb(home)
+    try {
+      expect(db.select().from(turns).all()).toEqual([
+        {
+          ownerId: 'm1',
+          botId: 'hatch',
+          ownerBody: 'hello',
+          botLineId: 'm2',
+          botBody: 'hi from Hatch',
+          createdAt: 1
+        },
+        {
+          ownerId: 'm3',
+          botId: 'hatch',
+          ownerBody: 'again',
+          botLineId: 'm4',
+          botBody: 'hi from Hatch',
+          createdAt: 1
+        }
+      ])
+    } finally {
+      db.$client.close()
+    }
   })
 
   it('does not create a teammates table', async () => {
@@ -278,7 +306,7 @@ describe('TalkStore', () => {
     const talk = new TalkStore({
       home,
       known: hatchKnown,
-      turn: async () => 'hi',
+      turn: reply('hi'),
       id: ids(),
       now: () => 1
     })
@@ -290,7 +318,7 @@ describe('TalkStore', () => {
       const names = db
         .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`)
         .all() as { name: string }[]
-      expect(names).toEqual([{ name: 'messages' }])
+      expect(names).toEqual([{ name: 'turns' }])
     } finally {
       db.close()
     }

@@ -1,6 +1,5 @@
-import { mkdirSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import Database from 'better-sqlite3'
+import { asc, eq } from 'drizzle-orm'
 import { parseBotId, type BotId } from '../shared/roster'
 import {
   parseBody,
@@ -12,15 +11,8 @@ import {
   type Thread
 } from '../shared/talk'
 import type { Turn } from './completions'
-import { talkDbPath } from './paths'
-
-type MessageRow = {
-  id: string
-  bot_id: string
-  author: string
-  body: string
-  created_at: number
-}
+import { openTalkDb, type TalkDb } from './db'
+import { turns } from './schema'
 
 export type TalkOptions = {
   readonly home: string
@@ -30,35 +22,23 @@ export type TalkOptions = {
   readonly id?: () => string
 }
 
-function toLine(row: MessageRow): Line {
+function toClosedTurn(row: typeof turns.$inferSelect): ClosedTurn {
   return {
-    id: parseMessageId(row.id),
-    body: row.body,
-    createdAt: row.created_at
-  }
-}
-
-function pairRows(botId: BotId, rows: MessageRow[]): ClosedTurn[] {
-  if (rows.length % 2 !== 0) {
-    throw new Error('thread unreadable')
-  }
-  const turns: ClosedTurn[] = []
-  for (let i = 0; i < rows.length; i += 2) {
-    const owner = rows[i]
-    const bot = rows[i + 1]
-    if (owner.author !== 'owner' || bot.author !== 'bot') {
-      throw new Error('thread unreadable')
+    owner: {
+      id: parseMessageId(row.ownerId),
+      body: row.ownerBody,
+      createdAt: row.createdAt
+    },
+    bot: {
+      id: parseMessageId(row.botLineId),
+      body: row.botBody,
+      createdAt: row.createdAt
     }
-    if (owner.bot_id !== botId || bot.bot_id !== botId) {
-      throw new Error('thread unreadable')
-    }
-    turns.push({ owner: toLine(owner), bot: toLine(bot) })
   }
-  return turns
 }
 
 export class TalkStore {
-  private readonly db: Database.Database
+  private readonly db: TalkDb
   private readonly turn: Turn
   private readonly known: (id: BotId) => boolean
   private readonly now: () => number
@@ -66,18 +46,7 @@ export class TalkStore {
   private readonly inFlight = new Set<string>()
 
   constructor(options: TalkOptions) {
-    mkdirSync(options.home, { recursive: true })
-    this.db = new Database(talkDbPath(options.home))
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS messages (
-        id TEXT PRIMARY KEY,
-        bot_id TEXT NOT NULL,
-        author TEXT NOT NULL,
-        body TEXT NOT NULL,
-        created_at INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS messages_bot_created ON messages (bot_id, created_at, id);
-    `)
+    this.db = openTalkDb(options.home)
     this.turn = options.turn
     this.known = options.known
     this.now = options.now ?? Date.now
@@ -85,7 +54,7 @@ export class TalkStore {
   }
 
   close(): void {
-    this.db.close()
+    this.db.$client.close()
   }
 
   thread(id: unknown): Thread {
@@ -111,19 +80,9 @@ export class TalkStore {
     this.inFlight.add(request.botId)
     try {
       const prior: Thread = { botId: request.botId, turns: this.readTurns(request.botId) }
-      let reply: string
-      try {
-        reply = await this.turn({ prior, ownerBody: parsed.body })
-      } catch (reason: unknown) {
-        const message = reason instanceof Error ? reason.message : 'turn failed'
-        if (message === 'needs_login') {
-          return { kind: 'needs_login' }
-        }
-        return { kind: 'turn_failed', detail: message }
-      }
-      const trimmed = reply.trim()
-      if (trimmed.length === 0) {
-        return { kind: 'turn_failed', detail: 'empty reply' }
+      const result = await this.turn({ prior, ownerBody: parsed.body })
+      if (result.kind !== 'ok') {
+        return result
       }
       const createdAt = this.now()
       const owner: Line = {
@@ -133,13 +92,14 @@ export class TalkStore {
       }
       const bot: Line = {
         id: parseMessageId(this.id()),
-        body: trimmed,
+        body: result.body,
         createdAt
       }
-      this.insertPair(request.botId, owner, bot)
+      const closed: ClosedTurn = { owner, bot }
+      this.insertTurn(request.botId, closed)
       return {
         kind: 'ok',
-        thread: { botId: request.botId, turns: [...prior.turns, { owner, bot }] }
+        thread: { botId: request.botId, turns: [...prior.turns, closed] }
       }
     } finally {
       this.inFlight.delete(request.botId)
@@ -147,22 +107,26 @@ export class TalkStore {
   }
 
   private readTurns(botId: BotId): ClosedTurn[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id, bot_id, author, body, created_at FROM messages WHERE bot_id = ? ORDER BY rowid`
-      )
-      .all(botId) as MessageRow[]
-    return pairRows(botId, rows)
+    return this.db
+      .select()
+      .from(turns)
+      .where(eq(turns.botId, botId))
+      .orderBy(asc(turns.createdAt), asc(turns.ownerId))
+      .all()
+      .map(toClosedTurn)
   }
 
-  private insertPair(botId: BotId, owner: Line, bot: Line): void {
-    const insert = this.db.prepare(
-      `INSERT INTO messages (id, bot_id, author, body, created_at) VALUES (?, ?, ?, ?, ?)`
-    )
-    const write = this.db.transaction(() => {
-      insert.run(owner.id, botId, 'owner', owner.body, owner.createdAt)
-      insert.run(bot.id, botId, 'bot', bot.body, bot.createdAt)
-    })
-    write()
+  private insertTurn(botId: BotId, turn: ClosedTurn): void {
+    this.db
+      .insert(turns)
+      .values({
+        ownerId: turn.owner.id,
+        botId,
+        ownerBody: turn.owner.body,
+        botLineId: turn.bot.id,
+        botBody: turn.bot.body,
+        createdAt: turn.owner.createdAt
+      })
+      .run()
   }
 }

@@ -28,7 +28,10 @@ describe('completionsTurn', () => {
         )
       }
     })
-    expect(await turn({ prior: emptyPrior, ownerBody: 'hello' })).toBe('hi from Hatch')
+    expect(await turn({ prior: emptyPrior, ownerBody: 'hello' })).toEqual({
+      kind: 'ok',
+      body: 'hi from Hatch'
+    })
     expect(seen).toEqual([
       {
         url: 'http://127.0.0.1:11434/v1/chat/completions',
@@ -77,7 +80,7 @@ describe('completionsTurn', () => {
     })
   })
 
-  it('throws needs_login and does not fetch when endpoint is null', async () => {
+  it('returns needs_login and does not fetch when endpoint is null', async () => {
     let fetched = false
     const turn = completionsTurn({
       endpoint: async () => null,
@@ -86,32 +89,32 @@ describe('completionsTurn', () => {
         return new Response('nope')
       }
     })
-    await expect(turn({ prior: emptyPrior, ownerBody: 'hello' })).rejects.toThrow('needs_login')
+    expect(await turn({ prior: emptyPrior, ownerBody: 'hello' })).toEqual({ kind: 'needs_login' })
     expect(fetched).toBe(false)
   })
 
-  it('throws turn failed on HTTP 500 without the key', async () => {
+  it('returns turn_failed on HTTP 500 without the key', async () => {
     const turn = completionsTurn({
       endpoint: async () => endpoint,
       fetch: async () => new Response('nope', { status: 500 })
     })
-    await expect(turn({ prior: emptyPrior, ownerBody: 'hello' })).rejects.toThrow('turn failed')
-    try {
-      await turn({ prior: emptyPrior, ownerBody: 'hello' })
-    } catch (reason: unknown) {
-      expect(reason instanceof Error && reason.message.includes('sk-test')).toBe(false)
-    }
+    const result = await turn({ prior: emptyPrior, ownerBody: 'hello' })
+    expect(result).toEqual({ kind: 'turn_failed', detail: 'turn failed' })
+    expect(JSON.stringify(result).includes('sk-test')).toBe(false)
   })
 
-  it('throws empty reply when content is missing', async () => {
+  it('returns empty reply when content is missing', async () => {
     const turn = completionsTurn({
       endpoint: async () => endpoint,
       fetch: async () => new Response(JSON.stringify({ choices: [{ message: {} }] }))
     })
-    await expect(turn({ prior: emptyPrior, ownerBody: 'hello' })).rejects.toThrow('empty reply')
+    expect(await turn({ prior: emptyPrior, ownerBody: 'hello' })).toEqual({
+      kind: 'turn_failed',
+      detail: 'empty reply'
+    })
   })
 
-  it('throws timeout when the request is aborted', async () => {
+  it('returns timeout when the request is aborted', async () => {
     const turn = completionsTurn({
       endpoint: async () => endpoint,
       timeoutMs: 20,
@@ -126,6 +129,32 @@ describe('completionsTurn', () => {
         return new Response('nope')
       }
     })
-    await expect(turn({ prior: emptyPrior, ownerBody: 'hello' })).rejects.toThrow('timeout')
+    expect(await turn({ prior: emptyPrior, ownerBody: 'hello' })).toEqual({
+      kind: 'turn_failed',
+      detail: 'timeout'
+    })
+  })
+
+  it('returns timeout when the body read is aborted', async () => {
+    const turn = completionsTurn({
+      endpoint: async () => endpoint,
+      timeoutMs: 20,
+      fetch: async (_input, init) =>
+        ({
+          ok: true,
+          json: () =>
+            new Promise<unknown>((_resolve, reject) => {
+              init?.signal?.addEventListener('abort', () => {
+                const error = new Error('aborted')
+                error.name = 'AbortError'
+                reject(error)
+              })
+            })
+        }) as Response
+    })
+    expect(await turn({ prior: emptyPrior, ownerBody: 'hello' })).toEqual({
+      kind: 'turn_failed',
+      detail: 'timeout'
+    })
   })
 })
