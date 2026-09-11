@@ -1,5 +1,13 @@
 import { createServer } from 'node:http'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -233,6 +241,7 @@ describe('primeTurn', () => {
   it('injects the runtime key and does not rewrite auth.json or a dummy apiKey', async () => {
     const home = tempHome()
     const authPath = join(home, 'prime', 'agent', 'auth.json')
+    mkdirSync(dirname(authPath), { recursive: true })
     writeFileSync(
       authPath,
       JSON.stringify({ xai: { type: 'api_key', key: 'sk-file' } }, null, 2),
