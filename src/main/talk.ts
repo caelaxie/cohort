@@ -64,6 +64,9 @@ export class TalkStore {
   }
 
   close(): void {
+    for (const { abort } of this.inflight.values()) {
+      abort.abort()
+    }
     this.db.$client.close()
   }
 

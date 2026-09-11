@@ -30,5 +30,5 @@ Preconditions:
 
 - Owner chat Send, hatch, and Remove are owner actions. They do not open Ask first.
 - `requestApproval` waits until Approve or Deny. Do not `await` it in the same eval that you need to return. Store the promise, then click.
-- There is no email, browser, or commerce tool here. The prompt is the gate for those classes when computer-use lands.
+- Computer send/post/buy/delete tools go through `ApprovalStore.gated`. This prompt is that gate.
 - Escape denies every pending request (safe default).

@@ -353,6 +353,38 @@ describe('shared room', () => {
     talk.close()
   })
 
+  it('close aborts an in-flight room turn and writes nothing', async () => {
+    const home = tempHome()
+    let started: () => void = () => undefined
+    const began = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const talk = new TalkStore({
+      home,
+      known: chiefKnown,
+      turn: async ({ signal }) => {
+        started()
+        await new Promise<void>((resolve) => {
+          signal?.addEventListener('abort', () => resolve(), { once: true })
+        })
+        return { kind: 'stopped' }
+      },
+      id: ids(),
+      now: () => 1
+    })
+    const sent = talk.roomSend({ botId: 'chief', body: 'hello room' })
+    await began
+    talk.close()
+    expect(await sent).toEqual({ kind: 'stopped' })
+    const reopened = new TalkStore({
+      home,
+      known: chiefKnown,
+      turn: reply('unused')
+    })
+    expect(reopened.room()).toEqual({ lines: [] })
+    reopened.close()
+  })
+
   it('stop targets the frozen flight bot, not a later To', () => {
     expect(talkStopTarget('scout', 'chief')).toBe('scout')
     expect(talkStopTarget(null, 'chief')).toBe('chief')

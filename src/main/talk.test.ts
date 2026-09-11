@@ -614,6 +614,41 @@ describe('Chief coordination', () => {
     roster.close()
   })
 
+  it('close aborts in-flight work and writes nothing', async () => {
+    const home = tempHome()
+    const roster = new RosterStore(home)
+    roster.hatch('Scout')
+    let started: () => void = () => undefined
+    const began = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const talk = new TalkStore({
+      home,
+      known: (id) => roster.known(id),
+      turn: async ({ signal }) => {
+        started()
+        await new Promise<void>((resolve) => {
+          signal?.addEventListener('abort', () => resolve(), { once: true })
+        })
+        return { kind: 'stopped' }
+      },
+      id: ids(),
+      now: () => 1
+    })
+    const assigned = talk.assign({ botId: 'scout', body: 'draft the outline' })
+    await began
+    talk.close()
+    expect(await assigned).toEqual({ kind: 'stopped' })
+    const reopened = new TalkStore({
+      home,
+      known: (id) => roster.known(id),
+      turn: reply('unused')
+    })
+    expect(reopened.thread('scout')).toEqual({ botId: 'scout', turns: [] })
+    reopened.close()
+    roster.close()
+  })
+
   it('does not invent a silent external side-effect API', async () => {
     const home = tempHome()
     const roster = new RosterStore(home)

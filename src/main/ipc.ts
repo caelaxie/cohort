@@ -2,6 +2,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { BrowserWindow, ipcMain } from 'electron'
 import { ApprovalStore } from './approval'
+import { Computer } from './computer'
 import { Kernel } from './kernel'
 import { defaultCohortHome } from './paths'
 import { primeTurn } from './prime'
@@ -44,6 +45,7 @@ export function registerIpc(): { quit: () => Promise<void> } {
     known: (id) => store.known(id),
     onChange: notifyApprovals
   })
+  const computer = new Computer({ approvals })
 
   ipcMain.handle('cohort:home', () => store.load())
   ipcMain.handle('cohort:select', (_event, id: unknown) => store.select(id))
@@ -69,8 +71,9 @@ export function registerIpc(): { quit: () => Promise<void> } {
 
   return {
     quit: async () => {
-      approvals.close()
+      computer.stop()
       talk.close()
+      approvals.close()
       store.close()
     }
   }
