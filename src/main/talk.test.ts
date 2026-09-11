@@ -606,6 +606,39 @@ describe('Chief coordination', () => {
     roster.close()
   })
 
+  it('does not insert an ok turn after abort', async () => {
+    const home = tempHome()
+    const roster = new RosterStore(home)
+    roster.hatch('Scout')
+    let release: () => void = () => undefined
+    let started: () => void = () => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const began = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const talk = new TalkStore({
+      home,
+      known: (id) => roster.known(id),
+      turn: async () => {
+        started()
+        await held
+        return { kind: 'ok', body: 'should not persist' }
+      },
+      id: ids(),
+      now: () => 1
+    })
+    const assigned = talk.assign({ botId: 'scout', body: 'draft the outline' })
+    await began
+    expect(talk.interrupt('scout')).toEqual({ kind: 'ok' })
+    release()
+    expect(await assigned).toEqual({ kind: 'stopped' })
+    expect(talk.thread('scout')).toEqual({ botId: 'scout', turns: [] })
+    talk.close()
+    roster.close()
+  })
+
   it('does not invent a silent external side-effect API', async () => {
     const home = tempHome()
     const roster = new RosterStore(home)

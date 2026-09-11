@@ -90,6 +90,9 @@ export class TalkStore {
       if (result.kind !== 'ok') {
         return result
       }
+      if (abort.signal.aborted) {
+        return { kind: 'stopped' }
+      }
       const createdAt = this.now()
       const owner: Line = {
         id: parseMessageId(this.id()),

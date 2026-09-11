@@ -16,6 +16,8 @@ import { parseMessageId } from '../shared/talk'
 import { botSystemPrompt, CHIEF_SYSTEM } from './chief-prompt'
 import type { Endpoint } from './kernel'
 import { assistantText, primeCatalogPath, primeTurn, type PrimeModule } from './prime'
+import { RosterStore } from './roster'
+import { TalkStore } from './talk'
 
 const homes: string[] = []
 
@@ -427,6 +429,51 @@ describe('primeTurn', () => {
     expect(await pending).toEqual({ kind: 'stopped' })
     expect(fake.aborted).toBe(1)
     expect(fake.disposed).toBe(1)
+  })
+
+  it('abort during a delayed endpoint writes no talk row', async () => {
+    const home = tempHome()
+    const roster = new RosterStore(home)
+    roster.hatch('Scout')
+    let release = (): void => undefined
+    let started = (): void => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const began = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    let n = 0
+    const fake = fakeModule({ reply: 'should not persist' })
+    const talk = new TalkStore({
+      home,
+      known: (id) => roster.known(id),
+      turn: primeTurn({
+        bot: (id) => {
+          const found = roster.bot(id)
+          if (!found) throw new Error('unknown bot')
+          return found
+        },
+        home,
+        endpoint: async () => {
+          started()
+          await held
+          return endpoint
+        },
+        load: async () => fake.module
+      }),
+      id: () => `m${++n}`,
+      now: () => 1
+    })
+    const assigned = talk.assign({ botId: 'scout', body: 'draft the outline' })
+    await began
+    expect(talk.interrupt('scout')).toEqual({ kind: 'ok' })
+    release()
+    expect(await assigned).toEqual({ kind: 'stopped' })
+    expect(talk.thread('scout')).toEqual({ botId: 'scout', turns: [] })
+    expect(fake.opens).toBe(0)
+    talk.close()
+    roster.close()
   })
 
   it('returns stopped without loading Prime when already aborted', async () => {
