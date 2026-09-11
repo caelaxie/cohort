@@ -7,6 +7,8 @@ const cohort = {
   select: (id: string): Promise<unknown> => ipcRenderer.invoke('cohort:select', id),
   kernel: (): Promise<unknown> => ipcRenderer.invoke('cohort:kernel'),
   connect: (input?: unknown): Promise<unknown> => ipcRenderer.invoke('cohort:connect', input),
+  thread: (botId: string): Promise<unknown> => ipcRenderer.invoke('cohort:thread', botId),
+  send: (input: unknown): Promise<unknown> => ipcRenderer.invoke('cohort:send', input),
   onOpenSettings: (callback: () => void): (() => void) => {
     const listener = (): void => {
       callback()
