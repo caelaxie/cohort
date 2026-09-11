@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { AgentSession } from '@earendil-works/pi-coding-agent'
 import type { Endpoint } from './kernel'
-import { HATCH_SYSTEM } from './hatch-prompt'
+import { CHIEF_SYSTEM } from './chief-prompt'
 import { primeWorkDir } from './paths'
 import type { Thread } from '../shared/talk'
 import type { Turn, TurnResult } from './turn'
@@ -196,7 +196,7 @@ export function primeTurn(options: {
         noPromptTemplates: true,
         noThemes: true,
         noContextFiles: true,
-        systemPrompt: HATCH_SYSTEM
+        systemPrompt: CHIEF_SYSTEM
       })
       await resourceLoader.reload()
       const created = await module.createAgentSession({

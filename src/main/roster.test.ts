@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
-import { parseBotId, parseRoster } from '../shared/roster'
+import { LEGACY_LEAD_ID, parseBotId, parseRoster } from '../shared/roster'
 import { stateDbPath } from './paths'
 import { RosterStore } from './roster'
 
@@ -24,11 +24,11 @@ function dataVersion(home: string): number {
   }
 }
 
-function hatchRoster() {
+function chiefRoster() {
   return {
-    hatch: { id: 'hatch', name: 'Hatch' },
+    chief: { id: 'chief', name: 'Chief' },
     others: [],
-    current: 'hatch'
+    current: 'chief'
   }
 }
 
@@ -39,10 +39,10 @@ afterEach(() => {
 })
 
 describe('RosterStore', () => {
-  it('loads Hatch only', () => {
+  it('loads Chief only', () => {
     const store = new RosterStore(tempHome())
-    expect(store.load()).toEqual(hatchRoster())
-    expect(store.known('hatch')).toBe(true)
+    expect(store.load()).toEqual(chiefRoster())
+    expect(store.known('chief')).toBe(true)
     expect(store.known(parseBotId('ghost'))).toBe(false)
     store.close()
   })
@@ -58,7 +58,7 @@ describe('RosterStore', () => {
     reopened.close()
   })
 
-  it('repairs a dangling current_id to hatch and writes it', () => {
+  it('repairs a dangling current_id to chief and writes it', () => {
     const home = tempHome()
     const store = new RosterStore(home)
     store.load()
@@ -71,25 +71,48 @@ describe('RosterStore', () => {
     db.close()
 
     const repaired = new RosterStore(home)
-    expect(repaired.load()).toEqual(hatchRoster())
+    expect(repaired.load()).toEqual(chiefRoster())
     repaired.close()
 
     const check = new Database(stateDbPath(home), { readonly: true, fileMustExist: true })
     try {
       expect(check.prepare(`SELECT value FROM meta WHERE key = 'current_id'`).get()).toEqual({
-        value: 'hatch'
+        value: 'chief'
       })
     } finally {
       check.close()
     }
   })
 
-  it('select hatch when already current does not bump sqlite data_version', () => {
+  it('repairs leftover hatch current_id to chief', () => {
     const home = tempHome()
     const store = new RosterStore(home)
-    expect(store.load()).toEqual(hatchRoster())
+    store.load()
+    store.close()
+    const db = new Database(stateDbPath(home))
+    db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('current_id', ?)`).run(
+      LEGACY_LEAD_ID
+    )
+    db.close()
+    const repaired = new RosterStore(home)
+    expect(repaired.load()).toEqual(chiefRoster())
+    repaired.close()
+    const check = new Database(stateDbPath(home), { readonly: true, fileMustExist: true })
+    try {
+      expect(check.prepare(`SELECT value FROM meta WHERE key = 'current_id'`).get()).toEqual({
+        value: 'chief'
+      })
+    } finally {
+      check.close()
+    }
+  })
+
+  it('select chief when already current does not bump sqlite data_version', () => {
+    const home = tempHome()
+    const store = new RosterStore(home)
+    expect(store.load()).toEqual(chiefRoster())
     const before = dataVersion(home)
-    expect(store.select('hatch')).toEqual(hatchRoster())
+    expect(store.select('chief')).toEqual(chiefRoster())
     expect(dataVersion(home)).toBe(before)
     store.close()
   })
@@ -113,7 +136,7 @@ describe('RosterStore', () => {
     db.close()
 
     const store = new RosterStore(home)
-    expect(store.load()).toEqual(hatchRoster())
+    expect(store.load()).toEqual(chiefRoster())
     store.close()
 
     const check = new Database(stateDbPath(home), { readonly: true, fileMustExist: true })
@@ -123,7 +146,7 @@ describe('RosterStore', () => {
         value: string
       }[]
       expect(rows).toEqual([
-        { key: 'current_id', value: 'hatch' },
+        { key: 'current_id', value: 'chief' },
         { key: 'current_uuid', value: '11111111-1111-4111-8111-111111111111' }
       ])
     } finally {
@@ -163,14 +186,14 @@ describe('RosterStore', () => {
 })
 
 describe('parseRoster', () => {
-  it('throws without hatch', () => {
-    expect(() => parseRoster({ others: [], current: 'hatch' })).toThrow('missing hatch')
+  it('throws without chief', () => {
+    expect(() => parseRoster({ others: [], current: 'chief' })).toThrow('missing chief')
   })
 
-  it('throws on hatch in others', () => {
-    const hatch = { id: 'hatch', name: 'Hatch' }
-    expect(() => parseRoster({ hatch, others: [hatch], current: 'hatch' })).toThrow(
-      'hatch in others'
+  it('throws on chief in others', () => {
+    const chief = { id: 'chief', name: 'Chief' }
+    expect(() => parseRoster({ chief, others: [chief], current: 'chief' })).toThrow(
+      'chief in others'
     )
   })
 })

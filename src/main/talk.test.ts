@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
-import { HATCH_ID } from '../shared/roster'
+import { CHIEF_ID, LEGACY_LEAD_ID } from '../shared/roster'
 import { BODY_MAX, parseSendResult, parseThread } from '../shared/talk'
 import type { Turn } from './turn'
 import { openTalkDb } from './db'
@@ -24,8 +24,8 @@ function ids(): () => string {
   return () => `m${++n}`
 }
 
-function hatchKnown(id: string): boolean {
-  return id === HATCH_ID
+function chiefKnown(id: string): boolean {
+  return id === CHIEF_ID
 }
 
 function reply(body: string): Turn {
@@ -39,13 +39,13 @@ afterEach(() => {
 })
 
 describe('TalkStore', () => {
-  it('starts with an empty Hatch thread', () => {
+  it('starts with an empty Chief thread', () => {
     const talk = new TalkStore({
       home: tempHome(),
-      known: hatchKnown,
+      known: chiefKnown,
       turn: reply('unused')
     })
-    expect(talk.thread('hatch')).toEqual({ botId: 'hatch', turns: [] })
+    expect(talk.thread('chief')).toEqual({ botId: 'chief', turns: [] })
     talk.close()
   })
 
@@ -53,19 +53,19 @@ describe('TalkStore', () => {
     const home = tempHome()
     const talk = new TalkStore({
       home,
-      known: hatchKnown,
-      turn: reply('hi from Hatch'),
+      known: chiefKnown,
+      turn: reply('hi from Chief'),
       id: ids(),
       now: () => 1
     })
-    expect(await talk.send({ botId: 'hatch', body: 'hello' })).toEqual({
+    expect(await talk.send({ botId: 'chief', body: 'hello' })).toEqual({
       kind: 'ok',
       thread: {
-        botId: 'hatch',
+        botId: 'chief',
         turns: [
           {
             owner: { id: 'm1', body: 'hello', createdAt: 1 },
-            bot: { id: 'm2', body: 'hi from Hatch', createdAt: 1 }
+            bot: { id: 'm2', body: 'hi from Chief', createdAt: 1 }
           }
         ]
       }
@@ -73,42 +73,42 @@ describe('TalkStore', () => {
     talk.close()
     const reopened = new TalkStore({
       home,
-      known: hatchKnown,
+      known: chiefKnown,
       turn: reply('unused')
     })
-    expect(reopened.thread('hatch')).toEqual({
-      botId: 'hatch',
+    expect(reopened.thread('chief')).toEqual({
+      botId: 'chief',
       turns: [
         {
           owner: { id: 'm1', body: 'hello', createdAt: 1 },
-          bot: { id: 'm2', body: 'hi from Hatch', createdAt: 1 }
+          bot: { id: 'm2', body: 'hi from Chief', createdAt: 1 }
         }
       ]
     })
     reopened.close()
   })
 
-  it('reopen keeps owner then Hatch when ids sort the other way', async () => {
+  it('reopen keeps owner then Chief when ids sort the other way', async () => {
     const home = tempHome()
     const seq = ['z-owner', 'a-bot']
     let i = 0
     const talk = new TalkStore({
       home,
-      known: hatchKnown,
-      turn: reply('hi from Hatch'),
+      known: chiefKnown,
+      turn: reply('hi from Chief'),
       id: () => seq[i++],
       now: () => 1
     })
-    await talk.send({ botId: 'hatch', body: 'hello' })
+    await talk.send({ botId: 'chief', body: 'hello' })
     talk.close()
     const reopened = new TalkStore({
       home,
-      known: hatchKnown,
+      known: chiefKnown,
       turn: reply('unused')
     })
-    expect(reopened.thread('hatch').turns[0]).toEqual({
+    expect(reopened.thread('chief').turns[0]).toEqual({
       owner: { id: 'z-owner', body: 'hello', createdAt: 1 },
-      bot: { id: 'a-bot', body: 'hi from Hatch', createdAt: 1 }
+      bot: { id: 'a-bot', body: 'hi from Chief', createdAt: 1 }
     })
     reopened.close()
   })
@@ -116,16 +116,16 @@ describe('TalkStore', () => {
   it('second send appends after the first turn', async () => {
     const talk = new TalkStore({
       home: tempHome(),
-      known: hatchKnown,
+      known: chiefKnown,
       turn: async ({ ownerBody }) => ({ kind: 'ok', body: `re:${ownerBody}` }),
       id: ids(),
       now: () => 1
     })
-    await talk.send({ botId: 'hatch', body: 'one' })
-    expect(await talk.send({ botId: 'hatch', body: 'two' })).toEqual({
+    await talk.send({ botId: 'chief', body: 'one' })
+    expect(await talk.send({ botId: 'chief', body: 'two' })).toEqual({
       kind: 'ok',
       thread: {
-        botId: 'hatch',
+        botId: 'chief',
         turns: [
           {
             owner: { id: 'm1', body: 'one', createdAt: 1 },
@@ -153,7 +153,7 @@ describe('TalkStore', () => {
     })
     const talk = new TalkStore({
       home: tempHome(),
-      known: hatchKnown,
+      known: chiefKnown,
       turn: async () => {
         calls += 1
         started()
@@ -163,14 +163,14 @@ describe('TalkStore', () => {
       id: ids(),
       now: () => 1
     })
-    const first = talk.send({ botId: 'hatch', body: 'hello' })
+    const first = talk.send({ botId: 'chief', body: 'hello' })
     await began
-    expect(await talk.send({ botId: 'hatch', body: 'again' })).toEqual({ kind: 'busy' })
+    expect(await talk.send({ botId: 'chief', body: 'again' })).toEqual({ kind: 'busy' })
     release()
     expect(await first).toEqual({
       kind: 'ok',
       thread: {
-        botId: 'hatch',
+        botId: 'chief',
         turns: [
           {
             owner: { id: 'm1', body: 'hello', createdAt: 1 },
@@ -187,11 +187,11 @@ describe('TalkStore', () => {
     const home = tempHome()
     const talk = new TalkStore({
       home,
-      known: hatchKnown,
+      known: chiefKnown,
       turn: reply('nope')
     })
-    expect(await talk.send({ botId: 'hatch', body: '   ' })).toEqual({ kind: 'empty' })
-    expect(talk.thread('hatch')).toEqual({ botId: 'hatch', turns: [] })
+    expect(await talk.send({ botId: 'chief', body: '   ' })).toEqual({ kind: 'empty' })
+    expect(talk.thread('chief')).toEqual({ botId: 'chief', turns: [] })
     talk.close()
     expect(existsSync(talkDbPath(home))).toBe(true)
   })
@@ -199,24 +199,24 @@ describe('TalkStore', () => {
   it('too-long body writes nothing', async () => {
     const talk = new TalkStore({
       home: tempHome(),
-      known: hatchKnown,
+      known: chiefKnown,
       turn: reply('nope')
     })
-    expect(await talk.send({ botId: 'hatch', body: 'x'.repeat(BODY_MAX + 1) })).toEqual({
+    expect(await talk.send({ botId: 'chief', body: 'x'.repeat(BODY_MAX + 1) })).toEqual({
       kind: 'too_long'
     })
-    expect(talk.thread('hatch').turns).toEqual([])
+    expect(talk.thread('chief').turns).toEqual([])
     talk.close()
   })
 
   it('needs_login writes nothing', async () => {
     const talk = new TalkStore({
       home: tempHome(),
-      known: hatchKnown,
+      known: chiefKnown,
       turn: async () => ({ kind: 'needs_login' })
     })
-    expect(await talk.send({ botId: 'hatch', body: 'hello' })).toEqual({ kind: 'needs_login' })
-    expect(talk.thread('hatch').turns).toEqual([])
+    expect(await talk.send({ botId: 'chief', body: 'hello' })).toEqual({ kind: 'needs_login' })
+    expect(talk.thread('chief').turns).toEqual([])
     talk.close()
   })
 
@@ -224,7 +224,7 @@ describe('TalkStore', () => {
     let fail = true
     const talk = new TalkStore({
       home: tempHome(),
-      known: hatchKnown,
+      known: chiefKnown,
       turn: async () => {
         if (fail) return { kind: 'turn_failed', detail: 'timeout' }
         return { kind: 'ok', body: 'ok' }
@@ -232,16 +232,16 @@ describe('TalkStore', () => {
       id: ids(),
       now: () => 1
     })
-    expect(await talk.send({ botId: 'hatch', body: 'hello' })).toEqual({
+    expect(await talk.send({ botId: 'chief', body: 'hello' })).toEqual({
       kind: 'turn_failed',
       detail: 'timeout'
     })
-    expect(talk.thread('hatch').turns).toEqual([])
+    expect(talk.thread('chief').turns).toEqual([])
     fail = false
-    expect(await talk.send({ botId: 'hatch', body: 'hello' })).toEqual({
+    expect(await talk.send({ botId: 'chief', body: 'hello' })).toEqual({
       kind: 'ok',
       thread: {
-        botId: 'hatch',
+        botId: 'chief',
         turns: [
           {
             owner: { id: 'm1', body: 'hello', createdAt: 1 },
@@ -256,7 +256,7 @@ describe('TalkStore', () => {
   it('unknown bot send returns unknown_bot and thread throws', async () => {
     const talk = new TalkStore({
       home: tempHome(),
-      known: hatchKnown,
+      known: chiefKnown,
       turn: reply('nope')
     })
     expect(await talk.send({ botId: 'ghost', body: 'hello' })).toEqual({ kind: 'unknown_bot' })
@@ -268,31 +268,31 @@ describe('TalkStore', () => {
     const home = tempHome()
     const talk = new TalkStore({
       home,
-      known: hatchKnown,
-      turn: reply('hi from Hatch'),
+      known: chiefKnown,
+      turn: reply('hi from Chief'),
       id: ids(),
       now: () => 1
     })
-    await talk.send({ botId: 'hatch', body: 'hello' })
-    await talk.send({ botId: 'hatch', body: 'again' })
+    await talk.send({ botId: 'chief', body: 'hello' })
+    await talk.send({ botId: 'chief', body: 'again' })
     talk.close()
     const db = openTalkDb(home)
     try {
       expect(db.select().from(turns).all()).toEqual([
         {
           ownerId: 'm1',
-          botId: 'hatch',
+          botId: 'chief',
           ownerBody: 'hello',
           botLineId: 'm2',
-          botBody: 'hi from Hatch',
+          botBody: 'hi from Chief',
           createdAt: 1
         },
         {
           ownerId: 'm3',
-          botId: 'hatch',
+          botId: 'chief',
           ownerBody: 'again',
           botLineId: 'm4',
-          botBody: 'hi from Hatch',
+          botBody: 'hi from Chief',
           createdAt: 1
         }
       ])
@@ -301,16 +301,107 @@ describe('TalkStore', () => {
     }
   })
 
+  it('renames leftover hatch bot_id rows to chief', () => {
+    const home = tempHome()
+    const path = talkDbPath(home)
+    const seed = new Database(path)
+    seed.exec(`
+      CREATE TABLE turns (
+        owner_id TEXT PRIMARY KEY,
+        bot_id TEXT NOT NULL,
+        owner_body TEXT NOT NULL,
+        bot_line_id TEXT NOT NULL,
+        bot_body TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+    `)
+    seed
+      .prepare(
+        `INSERT INTO turns (owner_id, bot_id, owner_body, bot_line_id, bot_body, created_at) VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run('m1', LEGACY_LEAD_ID, 'hello', 'm2', 'hi from Chief', 1)
+    seed.close()
+    const talk = new TalkStore({
+      home,
+      known: chiefKnown,
+      turn: reply('unused')
+    })
+    expect(talk.thread('chief')).toEqual({
+      botId: 'chief',
+      turns: [
+        {
+          owner: { id: 'm1', body: 'hello', createdAt: 1 },
+          bot: { id: 'm2', body: 'hi from Chief', createdAt: 1 }
+        }
+      ]
+    })
+    talk.close()
+  })
+
+  it('does not rewrite a hatch teammate row after lead-id migration', () => {
+    const home = tempHome()
+    const path = talkDbPath(home)
+    const seed = new Database(path)
+    seed.exec(`
+      CREATE TABLE turns (
+        owner_id TEXT PRIMARY KEY,
+        bot_id TEXT NOT NULL,
+        owner_body TEXT NOT NULL,
+        bot_line_id TEXT NOT NULL,
+        bot_body TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+    `)
+    seed
+      .prepare(
+        `INSERT INTO turns (owner_id, bot_id, owner_body, bot_line_id, bot_body, created_at) VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run('m1', LEGACY_LEAD_ID, 'hello', 'm2', 'hi from Chief', 1)
+    seed.close()
+    const first = openTalkDb(home)
+    first.$client.close()
+    const after = new Database(path)
+    after
+      .prepare(
+        `INSERT INTO turns (owner_id, bot_id, owner_body, bot_line_id, bot_body, created_at) VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run('m3', LEGACY_LEAD_ID, 'from hatch', 'm4', 'hi from Hatch', 2)
+    after.close()
+    const second = openTalkDb(home)
+    try {
+      expect(second.select().from(turns).all()).toEqual([
+        {
+          ownerId: 'm1',
+          botId: CHIEF_ID,
+          ownerBody: 'hello',
+          botLineId: 'm2',
+          botBody: 'hi from Chief',
+          createdAt: 1
+        },
+        {
+          ownerId: 'm3',
+          botId: LEGACY_LEAD_ID,
+          ownerBody: 'from hatch',
+          botLineId: 'm4',
+          botBody: 'hi from Hatch',
+          createdAt: 2
+        }
+      ])
+    } finally {
+      second.$client.close()
+    }
+  })
+
   it('does not create a teammates table', async () => {
     const home = tempHome()
     const talk = new TalkStore({
       home,
-      known: hatchKnown,
+      known: chiefKnown,
       turn: reply('hi'),
       id: ids(),
       now: () => 1
     })
-    await talk.send({ botId: 'hatch', body: 'hello' })
+    await talk.send({ botId: 'chief', body: 'hello' })
     talk.close()
     expect(existsSync(stateDbPath(home))).toBe(false)
     const db = new Database(talkDbPath(home), { readonly: true, fileMustExist: true })
@@ -329,7 +420,7 @@ describe('parseThread', () => {
   it('rejects a payload that smuggles apiKey', () => {
     expect(() =>
       parseThread({
-        botId: 'hatch',
+        botId: 'chief',
         turns: [],
         apiKey: 'sk'
       })
@@ -340,7 +431,7 @@ describe('parseThread', () => {
 describe('parseSendResult', () => {
   it('rejects a result that smuggles key', () => {
     expect(() =>
-      parseSendResult({ kind: 'ok', thread: { botId: 'hatch', turns: [] }, key: 'sk' })
+      parseSendResult({ kind: 'ok', thread: { botId: 'chief', turns: [] }, key: 'sk' })
     ).toThrow('secret field')
   })
 })

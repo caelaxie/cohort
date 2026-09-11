@@ -1,7 +1,7 @@
 import { asc, eq, sql } from 'drizzle-orm'
 import {
-  HATCH,
-  HATCH_ID,
+  CHIEF,
+  CHIEF_ID,
   parseBotId,
   parseTeammate,
   type BotId,
@@ -28,11 +28,11 @@ export class RosterStore {
     const others = this.readOthers()
     const stored = this.readCurrentId()
     const current =
-      stored !== null && this.knownIds(others).has(stored) ? parseBotId(stored) : HATCH_ID
+      stored !== null && this.knownIds(others).has(stored) ? parseBotId(stored) : CHIEF_ID
     if (stored !== current) {
       this.writeCurrent(current)
     }
-    return { hatch: HATCH, others, current }
+    return { chief: CHIEF, others, current }
   }
 
   known(id: BotId): boolean {
@@ -49,11 +49,11 @@ export class RosterStore {
     if (stored !== botId) {
       this.writeCurrent(botId)
     }
-    return { hatch: HATCH, others, current: botId }
+    return { chief: CHIEF, others, current: botId }
   }
 
   private knownIds(others: readonly Teammate[]): Set<string> {
-    return new Set<string>([HATCH_ID, ...others.map((item) => item.id)])
+    return new Set<string>([CHIEF_ID, ...others.map((item) => item.id)])
   }
 
   private readOthers(): Teammate[] {

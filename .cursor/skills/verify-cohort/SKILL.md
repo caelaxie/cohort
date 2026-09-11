@@ -5,7 +5,7 @@ description: Drive the real Cohort desktop app (Electron + React) to prove user-
 
 # Verify Cohort
 
-Cohort is an Electron desktop app (macOS): one window, React renderer, named-bot roster in the left sidebar under Crew, Hatch as the lead bot, and a Hatch thread with a Message composer in the main pane. State lives in `$COHORT_HOME` (SQLite). Hatch is a compile-time identity, not a sqlite row.
+Cohort is an Electron desktop app (macOS): one window, React renderer, named-bot roster in the left sidebar under Crew, Chief as the lead bot, and a Chief thread with a Message composer in the main pane. State lives in `$COHORT_HOME` (SQLite). Chief is a compile-time identity, not a sqlite row.
 
 This skill launches a throwaway instance, drives it over the Chrome DevTools Protocol, and captures proof. It never touches the user's real `~/.cohort` data or any other Electron app on this Mac.
 
@@ -48,7 +48,7 @@ Run first whenever anything looks off, and once after every launch:
 node .cursor/skills/verify-cohort/scripts/cohort-drive.mjs doctor --port $PORT
 ```
 
-`doctor` exits 0 only when the CDP endpoint answers, a `page` target exists, the `window.cohort` preload bridge is present, and `cohort.home()` returns. It prints page title/URL, Hatch id and name, and the current bot id as JSON.
+`doctor` exits 0 only when the CDP endpoint answers, a `page` target exists, the `window.cohort` preload bridge is present, and `cohort.home()` returns. It prints page title/URL, Chief id and name, and the current bot id as JSON.
 
 Also check, before driving:
 
@@ -80,7 +80,7 @@ Stable handles in this repo (prefer these over CSS position):
 
 - Sidebar heading: `Crew`.
 - Current bot: sidebar button with `aria-current="page"`; main header is the `h1`.
-- Hatch row: button whose trimmed text is `Hatch`.
+- Chief row: button whose trimmed text is `Chief`.
 - Settings footer: button whose trimmed text is `Settings`. The Settings pane `h1` is `Settings`.
 - Errors render in `p[role="alert"]`.
 

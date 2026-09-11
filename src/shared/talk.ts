@@ -175,7 +175,7 @@ export function sendCopy(result: Exclude<SendResult, { kind: 'ok' }>): string {
     case 'needs_login':
       return 'Connect a model in Settings'
     case 'busy':
-      return 'Hatch is still answering'
+      return 'Chief is still answering'
     case 'empty':
       return 'Type a message'
     case 'too_long':

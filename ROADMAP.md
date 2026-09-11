@@ -1,21 +1,21 @@
 # Cohort roadmap
 
 Open-source Grok Bot: named AI teammates on this Mac.
-The lead bot is **Hatch**. Runtime: Prime Agent, embedded. Browser hands on this Mac while the app is open.
+The lead bot is **Chief**. Runtime: Prime Agent, embedded. Browser hands on this Mac while the app is open.
 v1 is for you. The crew is the product — do not invent a first vertical.
 
-Home on this branch is the named-bot roster with Hatch as lead.
+Home on this branch is the named-bot roster with Chief as lead.
 
 Authority for v1 behavior: this file.
 
 ## v1 — Personal crew
 
 - [x] Named bots are the home screen (not workspaces)
-- [x] Hatch is the lead bot on that roster (Hatch is not the product name)
-- [x] Talk to Hatch and hatched bots as teammates
-- [ ] Hatch can hatch another named bot
-- [ ] Hatch can coordinate other bots
-- [ ] Shared room: you, Hatch, and other bots in one thread
+- [x] Chief is the lead bot on that roster (Chief is not the product name)
+- [x] Talk to Chief and hatched bots as teammates
+- [ ] Chief can hatch another named bot
+- [ ] Chief can coordinate other bots
+- [ ] Shared room: you, Chief, and other bots in one thread
 - [ ] This Mac is the computer while Cohort is open
 - [ ] Closing Cohort stops the bots
 - [ ] Bots use the browser you are already logged into (one shared login)
@@ -50,6 +50,6 @@ Authority for v1 behavior: this file.
 
 ## Leftover, not the product
 
-Home is the named-bot roster with Hatch as lead. Workspace folders, add-files, and Boxlite `/workspace` are leftover. Do not extend them as Cohort v1.
+Home is the named-bot roster with Chief as lead. Workspace folders, add-files, and Boxlite `/workspace` are leftover. Do not extend them as Cohort v1.
 
 History of that loop: `docs/archive/`.
