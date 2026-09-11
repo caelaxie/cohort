@@ -3,8 +3,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
-import { CHIEF_ID, LEGACY_LEAD_ID } from '../shared/roster'
-import { BODY_MAX, parseSendResult, parseThread } from '../shared/talk'
+import { CHIEF_ID, LEGACY_LEAD_ID, parseBotId } from '../shared/roster'
+import { BODY_MAX, parseSendResult, parseThread, sendCopy } from '../shared/talk'
+import { botSystemPrompt } from './chief-prompt'
+import { RosterStore } from './roster'
 import type { Turn } from './turn'
 import { openTalkDb } from './db'
 import { stateDbPath, talkDbPath } from './paths'
@@ -390,6 +392,63 @@ describe('TalkStore', () => {
     } finally {
       second.$client.close()
     }
+  })
+
+  it('talks to a hatched bot on its own thread with that bot identity', async () => {
+    const home = tempHome()
+    const roster = new RosterStore(home)
+    const hatched = roster.hatch('Scout')
+    expect(hatched.others).toEqual([{ id: 'scout', name: 'Scout' }])
+    expect(hatched.current).toBe('scout')
+    expect(roster.select('scout').current).toBe('scout')
+
+    let seen: string | null = null
+    const talk = new TalkStore({
+      home,
+      known: (id) => roster.known(id),
+      turn: async ({ prior }) => {
+        const bot = roster.bot(prior.botId)
+        if (!bot) {
+          throw new Error('unknown bot')
+        }
+        seen = botSystemPrompt(bot)
+        return { kind: 'ok', body: `hi from ${bot.name}` }
+      },
+      id: ids(),
+      now: () => 1
+    })
+    const sent = await talk.send({ botId: 'scout', body: 'hello' })
+    expect(sent).toEqual({
+      kind: 'ok',
+      thread: {
+        botId: 'scout',
+        turns: [
+          {
+            owner: { id: 'm1', body: 'hello', createdAt: 1 },
+            bot: { id: 'm2', body: 'hi from Scout', createdAt: 1 }
+          }
+        ]
+      }
+    })
+    expect(seen).toBe(
+      'You are Scout, a named teammate in Cohort, a crew of named AI teammates on this Mac. Reply as a teammate. Do not claim to have tools or a computer.'
+    )
+    expect(sendCopy({ kind: 'busy' }, 'Scout')).toBe('Scout is still answering')
+    expect(talk.thread('chief')).toEqual({ botId: 'chief', turns: [] })
+    expect(JSON.stringify(sent).includes('key')).toBe(false)
+    expect(JSON.stringify(sent).includes('apiKey')).toBe(false)
+    expect(() =>
+      parseSendResult({ kind: 'ok', thread: { botId: 'scout', turns: [] }, key: 'sk' })
+    ).toThrow('secret field')
+    expect(roster.remove('scout')).toEqual({
+      chief: { id: 'chief', name: 'Chief' },
+      others: [],
+      current: 'chief'
+    })
+    expect(roster.known(parseBotId('scout'))).toBe(false)
+    expect(await talk.send({ botId: 'scout', body: 'hello' })).toEqual({ kind: 'unknown_bot' })
+    talk.close()
+    roster.close()
   })
 
   it('does not create a teammates table', async () => {

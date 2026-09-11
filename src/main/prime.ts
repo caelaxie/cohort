@@ -1,10 +1,11 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { AgentSession } from '@earendil-works/pi-coding-agent'
-import type { Endpoint } from './kernel'
-import { CHIEF_SYSTEM } from './chief-prompt'
-import { primeWorkDir } from './paths'
+import type { Bot, BotId } from '../shared/roster'
 import type { Thread } from '../shared/talk'
+import { botSystemPrompt } from './chief-prompt'
+import type { Endpoint } from './kernel'
+import { primeWorkDir } from './paths'
 import type { Turn, TurnResult } from './turn'
 
 type PrimeMessage = AgentSession['messages'][number]
@@ -128,6 +129,7 @@ export function primeCatalogPath(home: string): string {
 export function primeTurn(options: {
   readonly endpoint: () => Promise<Endpoint | null>
   readonly home: string
+  readonly bot: (id: BotId) => Bot
   readonly load?: () => Promise<PrimeModule>
   readonly timeoutMs?: number
 }): Turn {
@@ -196,7 +198,7 @@ export function primeTurn(options: {
         noPromptTemplates: true,
         noThemes: true,
         noContextFiles: true,
-        systemPrompt: CHIEF_SYSTEM
+        systemPrompt: botSystemPrompt(options.bot(input.prior.botId))
       })
       await resourceLoader.reload()
       const created = await module.createAgentSession({

@@ -3,7 +3,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
-import { LEGACY_LEAD_ID, parseBotId, parseRoster } from '../shared/roster'
+import {
+  LEGACY_LEAD_ID,
+  NAME_MAX,
+  parseBotId,
+  parseBotName,
+  parseRoster,
+  teammateIdFromName
+} from '../shared/roster'
 import { stateDbPath } from './paths'
 import { RosterStore } from './roster'
 
@@ -154,6 +161,69 @@ describe('RosterStore', () => {
     }
   })
 
+  it('hatches a named teammate, selects it, and removes it', () => {
+    const home = tempHome()
+    const store = new RosterStore(home)
+    expect(store.hatch('Scout')).toEqual({
+      chief: { id: 'chief', name: 'Chief' },
+      others: [{ id: 'scout', name: 'Scout' }],
+      current: 'scout'
+    })
+    expect(store.known(parseBotId('scout'))).toBe(true)
+    expect(store.bot(parseBotId('scout'))).toEqual({ id: 'scout', name: 'Scout' })
+    expect(store.select('scout')).toEqual({
+      chief: { id: 'chief', name: 'Chief' },
+      others: [{ id: 'scout', name: 'Scout' }],
+      current: 'scout'
+    })
+    expect(store.remove('scout')).toEqual(chiefRoster())
+    expect(store.known(parseBotId('scout'))).toBe(false)
+    store.close()
+
+    const reopened = new RosterStore(home)
+    expect(reopened.load()).toEqual(chiefRoster())
+    reopened.close()
+  })
+
+  it('hatches Hatch as a teammate id after the lead rename', () => {
+    const store = new RosterStore(tempHome())
+    expect(store.hatch('Hatch')).toEqual({
+      chief: { id: 'chief', name: 'Chief' },
+      others: [{ id: LEGACY_LEAD_ID, name: 'Hatch' }],
+      current: LEGACY_LEAD_ID
+    })
+    store.close()
+  })
+
+  it('rejects a second hatch of the same name and leaves the first', () => {
+    const store = new RosterStore(tempHome())
+    store.hatch('Scout')
+    expect(() => store.hatch('scout')).toThrow('That bot already exists')
+    expect(store.load().others).toEqual([{ id: 'scout', name: 'Scout' }])
+    store.close()
+  })
+
+  it('rejects hatching Chief and does not write a teammates row', () => {
+    const home = tempHome()
+    const store = new RosterStore(home)
+    expect(() => store.hatch('Chief')).toThrow('Chief is already the lead')
+    expect(store.load()).toEqual(chiefRoster())
+    store.close()
+    const check = new Database(stateDbPath(home), { readonly: true, fileMustExist: true })
+    try {
+      expect(check.prepare(`SELECT id, name FROM teammates`).all()).toEqual([])
+    } finally {
+      check.close()
+    }
+  })
+
+  it('cannot remove Chief', () => {
+    const store = new RosterStore(tempHome())
+    expect(() => store.remove('chief')).toThrow('cannot remove chief')
+    expect(store.load()).toEqual(chiefRoster())
+    store.close()
+  })
+
   it('unknown select throws and does not write current_id', () => {
     const home = tempHome()
     const db = new Database(stateDbPath(home))
@@ -195,5 +265,16 @@ describe('parseRoster', () => {
     expect(() => parseRoster({ chief, others: [chief], current: 'chief' })).toThrow(
       'chief in others'
     )
+  })
+})
+
+describe('parseBotName', () => {
+  it('trims and rejects empty, too-long, and unslugable names', () => {
+    expect(parseBotName('  Scout  ')).toBe('Scout')
+    expect(() => parseBotName('   ')).toThrow('Name a bot')
+    expect(() => parseBotName('x'.repeat(NAME_MAX + 1))).toThrow('Name is too long')
+    expect(teammateIdFromName('Ada Lovelace')).toBe('ada-lovelace')
+    expect(() => teammateIdFromName('!!!')).toThrow('Name a bot')
+    expect(() => teammateIdFromName('Chief')).toThrow('Chief is already the lead')
   })
 })

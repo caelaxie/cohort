@@ -3,7 +3,10 @@ import {
   CHIEF,
   CHIEF_ID,
   parseBotId,
+  parseBotName,
   parseTeammate,
+  teammateIdFromName,
+  type Bot,
   type BotId,
   type Roster,
   type Teammate
@@ -36,7 +39,41 @@ export class RosterStore {
   }
 
   known(id: BotId): boolean {
-    return this.knownIds(this.readOthers()).has(id)
+    return this.bot(id) !== null
+  }
+
+  bot(id: BotId): Bot | null {
+    if (id === CHIEF_ID) return CHIEF
+    return this.readOthers().find((item) => item.id === id) ?? null
+  }
+
+  hatch(input: unknown): Roster {
+    const name = parseBotName(input)
+    const id = teammateIdFromName(name)
+    const others = this.readOthers()
+    if (this.knownIds(others).has(id)) {
+      throw new Error('That bot already exists')
+    }
+    this.db.insert(teammates).values({ id, name }).run()
+    this.writeCurrent(id)
+    return { chief: CHIEF, others: this.readOthers(), current: id }
+  }
+
+  remove(id: unknown): Roster {
+    const botId = parseBotId(id)
+    if (botId === CHIEF_ID) {
+      throw new Error('cannot remove chief')
+    }
+    const others = this.readOthers()
+    if (!this.knownIds(others).has(botId)) {
+      throw new Error('unknown bot')
+    }
+    this.db.delete(teammates).where(eq(teammates.id, botId)).run()
+    const stored = this.readCurrentId()
+    if (stored === botId) {
+      this.writeCurrent(CHIEF_ID)
+    }
+    return this.load()
   }
 
   select(id: unknown): Roster {

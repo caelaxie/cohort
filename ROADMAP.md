@@ -13,7 +13,7 @@ Authority for v1 behavior: this file.
 - [x] Named bots are the home screen (not workspaces)
 - [x] Chief is the lead bot on that roster (Chief is not the product name)
 - [x] Talk to Chief and hatched bots as teammates
-- [ ] Chief can hatch another named bot
+- [x] Chief can hatch another named bot
 - [ ] Chief can coordinate other bots
 - [ ] Shared room: you, Chief, and other bots in one thread
 - [ ] This Mac is the computer while Cohort is open

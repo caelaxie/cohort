@@ -43,3 +43,4 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Bot roster](./bot-roster.md) covers Chief on launch, the Crew heading, an empty Chief thread with a Message composer, persistence across reopen, and clicking Chief staying current.
 - [Model settings](./model-settings.md) covers the Settings footer, the Settings pane, Chief staying current, and connecting a model already on this Mac.
 - [Talk to Chief](./talk.md) covers sending a message on the Chief pane and seeing Chief's reply.
+- [Hatch a teammate](./hatch.md) covers naming a bot from Chief's pane, selecting it, talking as that bot, and removing it.

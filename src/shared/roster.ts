@@ -1,5 +1,6 @@
 export const CHIEF_ID = 'chief' as const
 export const LEGACY_LEAD_ID = 'hatch' as const
+export const NAME_MAX = 40
 export type ChiefId = typeof CHIEF_ID
 export type TeammateId = string & { readonly __brand: 'TeammateId' }
 export type BotId = ChiefId | TeammateId
@@ -31,6 +32,34 @@ export function parseBotId(value: unknown): BotId {
     throw new Error('invalid bot id')
   }
   return value as TeammateId
+}
+
+export function parseBotName(value: unknown): string {
+  if (typeof value !== 'string') {
+    throw new Error('invalid name')
+  }
+  const name = value.trim()
+  if (name.length === 0) {
+    throw new Error('Name a bot')
+  }
+  if (name.length > NAME_MAX) {
+    throw new Error('Name is too long')
+  }
+  return name
+}
+
+export function teammateIdFromName(name: string): TeammateId {
+  const id = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  if (id.length === 0) {
+    throw new Error('Name a bot')
+  }
+  if (id === CHIEF_ID) {
+    throw new Error('Chief is already the lead')
+  }
+  return id as TeammateId
 }
 
 export function chiefOnlyRoster(): Roster {
