@@ -1,4 +1,4 @@
-import type { CohortApi } from '../shared/roster'
+import type { CohortApi } from '../shared/cohort'
 
 declare global {
   interface Window {
