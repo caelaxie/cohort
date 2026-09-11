@@ -11,6 +11,9 @@ const cohort = {
   connect: (input?: unknown): Promise<unknown> => ipcRenderer.invoke('cohort:connect', input),
   thread: (botId: string): Promise<unknown> => ipcRenderer.invoke('cohort:thread', botId),
   send: (input: unknown): Promise<unknown> => ipcRenderer.invoke('cohort:send', input),
+  assign: (input: unknown): Promise<unknown> => ipcRenderer.invoke('cohort:assign', input),
+  interrupt: (botId: string): Promise<unknown> => ipcRenderer.invoke('cohort:interrupt', botId),
+  coordination: (): Promise<unknown> => ipcRenderer.invoke('cohort:coordination'),
   onOpenSettings: (callback: () => void): (() => void) => {
     const listener = (): void => {
       callback()

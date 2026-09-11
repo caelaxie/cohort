@@ -36,11 +36,17 @@ export function registerIpc(): { quit: () => Promise<void> } {
   ipcMain.handle('cohort:home', () => store.load())
   ipcMain.handle('cohort:select', (_event, id: unknown) => store.select(id))
   ipcMain.handle('cohort:hatch', (_event, name: unknown) => store.hatch(name))
-  ipcMain.handle('cohort:remove', (_event, id: unknown) => store.remove(id))
+  ipcMain.handle('cohort:remove', (_event, id: unknown) => {
+    talk.interrupt(id)
+    return store.remove(id)
+  })
   ipcMain.handle('cohort:kernel', () => kernel.status())
   ipcMain.handle('cohort:connect', (_event, input: unknown) => kernel.connect(input))
   ipcMain.handle('cohort:thread', (_event, id: unknown) => talk.thread(id))
   ipcMain.handle('cohort:send', (_event, input: unknown) => talk.send(input))
+  ipcMain.handle('cohort:assign', (_event, input: unknown) => talk.assign(input))
+  ipcMain.handle('cohort:interrupt', (_event, id: unknown) => talk.interrupt(id))
+  ipcMain.handle('cohort:coordination', () => talk.coordination())
 
   return {
     quit: async () => {

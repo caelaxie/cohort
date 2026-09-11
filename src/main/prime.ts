@@ -33,7 +33,16 @@ function timeoutError(): Error {
   return error
 }
 
-function failed(reason: unknown): TurnResult {
+function stoppedError(): Error {
+  const error = new Error('stopped')
+  error.name = 'AbortError'
+  return error
+}
+
+function failed(reason: unknown, stopped: boolean): TurnResult {
+  if (stopped) {
+    return { kind: 'stopped' }
+  }
   if (isAbort(reason)) {
     return { kind: 'turn_failed', detail: 'timeout' }
   }
@@ -137,32 +146,52 @@ export function primeTurn(options: {
   const timeoutMs = options.timeoutMs ?? TURN_MS
 
   return async (input) => {
-    const ready = await options.endpoint()
-    if (ready === null) {
-      return { kind: 'needs_login' }
-    }
-
     let session: AgentSession | undefined
     let timedOut = false
+    let stopped = false
     let rejectDeadline: ((reason: Error) => void) | undefined
     const deadline = new Promise<never>((_, reject) => {
       rejectDeadline = reject
     })
+    const onAbort = (): void => {
+      stopped = true
+      void session?.abort()
+      rejectDeadline?.(stoppedError())
+    }
+    input.signal?.addEventListener('abort', onAbort, { once: true })
+    if (input.signal?.aborted) {
+      input.signal.removeEventListener('abort', onAbort)
+      return { kind: 'stopped' }
+    }
+
     const timer = setTimeout(() => {
       timedOut = true
       void session?.abort()
       rejectDeadline?.(timeoutError())
     }, timeoutMs)
 
-    const opened = openTurn(ready)
+    let opened: Promise<TurnResult> | undefined
     try {
-      return await Promise.race([opened, deadline])
+      const ready = await Promise.race([options.endpoint(), deadline])
+      if (stopped || input.signal?.aborted) {
+        return { kind: 'stopped' }
+      }
+      if (ready === null) {
+        return { kind: 'needs_login' }
+      }
+      opened = openTurn(ready)
+      const result = await Promise.race([opened, deadline])
+      if (stopped || input.signal?.aborted) {
+        return { kind: 'stopped' }
+      }
+      return result
     } catch (reason: unknown) {
-      return failed(reason)
+      return failed(reason, stopped || input.signal?.aborted === true)
     } finally {
       clearTimeout(timer)
+      input.signal?.removeEventListener('abort', onAbort)
       session?.dispose()
-      void opened.catch(() => undefined)
+      void opened?.catch(() => undefined)
     }
 
     async function openTurn(endpoint: Endpoint): Promise<TurnResult> {
@@ -213,11 +242,11 @@ export function primeTurn(options: {
         settingsManager
       })
       session = created.session
-      if (timedOut) {
+      if (timedOut || stopped) {
         void session.abort()
         session.dispose()
         session = undefined
-        throw timeoutError()
+        throw stopped ? stoppedError() : timeoutError()
       }
       if (input.prior.turns.length > 0) {
         session.agent.state.messages = priorMessages(input.prior, endpoint.model)
