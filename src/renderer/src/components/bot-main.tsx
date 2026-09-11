@@ -40,7 +40,7 @@ export function BotMain({
   const [draft, setDraft] = useState('')
   const [hatchName, setHatchName] = useState('')
   const [brief, setBrief] = useState('')
-  const [assignee, setAssignee] = useState(roster.others[0]?.id ?? '')
+  const [assigneeDraft, setAssigneeDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [assigning, setAssigning] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
@@ -62,11 +62,9 @@ export function BotMain({
     }
   }, [bot.id])
 
-  useEffect(() => {
-    if (!roster.others.some((item) => item.id === assignee)) {
-      setAssignee(roster.others[0]?.id ?? '')
-    }
-  }, [assignee, roster.others])
+  const assignee = roster.others.some((item) => item.id === assigneeDraft)
+    ? assigneeDraft
+    : (roster.others[0]?.id ?? '')
 
   async function onAssignSubmit(): Promise<void> {
     const target = roster.others.find((item) => item.id === assignee)
@@ -171,7 +169,7 @@ export function BotMain({
               value={assignee}
               className="rounded-md border border-hairline bg-canvas px-3 py-2 text-sm text-ink"
               onChange={(event) => {
-                setAssignee(event.target.value)
+                setAssigneeDraft(event.target.value)
               }}
             >
               {roster.others.map((item) => (
