@@ -1,15 +1,12 @@
-import { tmpdir } from 'node:os'
 import { join } from 'path'
 import { app, shell, BrowserWindow, Menu } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { registerIpc } from './ipc'
+import { resolveHome } from './paths'
 
-if (process.env.COHORT_HOME) {
-  app.setPath('userData', join(process.env.COHORT_HOME, 'electron'))
-} else if (is.dev) {
-  app.setPath('userData', join(tmpdir(), 'cohort-electron-dev'))
-}
+const layout = resolveHome(process.env)
+app.setPath('userData', layout.electron)
 
 let shutdown: (() => Promise<void>) | null = null
 
@@ -92,7 +89,7 @@ if (!gotLock) {
       optimizer.watchWindowShortcuts(window)
     })
 
-    const session = registerIpc()
+    const session = registerIpc(layout)
     shutdown = session.quit
     installMenu()
     createWindow()

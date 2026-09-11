@@ -15,7 +15,7 @@ import {
 } from '../shared/approval'
 import { parseBotId } from '../shared/roster'
 import { ApprovalStore } from './approval'
-import { approvalDbPath } from './paths'
+import { homeAt } from './paths'
 
 const homes: string[] = []
 
@@ -210,7 +210,7 @@ describe('ApprovalStore', () => {
     const home = tempHome()
     const seed = new ApprovalStore({ home, known: chiefKnown })
     seed.close()
-    const db = new Database(approvalDbPath(home))
+    const db = new Database(homeAt(home).approvalDb)
     db.prepare(
       `INSERT INTO pending_approvals (id, bot_id, action, summary, payload, created_at)
        VALUES (?, ?, ?, ?, ?, ?)`
@@ -237,7 +237,7 @@ describe('ApprovalStore', () => {
     store.deny(store.snapshot().pending[0].id)
     await done
     store.close()
-    expect(existsSync(approvalDbPath(home))).toBe(true)
+    expect(existsSync(homeAt(home).approvalDb)).toBe(true)
   })
 
   it('rejects an unknown bot before anything is pending', async () => {

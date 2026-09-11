@@ -11,7 +11,7 @@ import {
   parseRoster,
   teammateIdFromName
 } from '../shared/roster'
-import { stateDbPath } from './paths'
+import { homeAt } from './paths'
 import { RosterStore } from './roster'
 
 const homes: string[] = []
@@ -23,7 +23,7 @@ function tempHome(): string {
 }
 
 function dataVersion(home: string): number {
-  const db = new Database(stateDbPath(home), { readonly: true, fileMustExist: true })
+  const db = new Database(homeAt(home).stateDb, { readonly: true, fileMustExist: true })
   try {
     return Number(db.pragma('data_version', { simple: true }))
   } finally {
@@ -71,7 +71,7 @@ describe('RosterStore', () => {
     store.load()
     store.close()
 
-    const db = new Database(stateDbPath(home))
+    const db = new Database(homeAt(home).stateDb)
     db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('current_id', ?)`).run(
       'missing-bot'
     )
@@ -81,7 +81,7 @@ describe('RosterStore', () => {
     expect(repaired.load()).toEqual(chiefRoster())
     repaired.close()
 
-    const check = new Database(stateDbPath(home), { readonly: true, fileMustExist: true })
+    const check = new Database(homeAt(home).stateDb, { readonly: true, fileMustExist: true })
     try {
       expect(check.prepare(`SELECT value FROM meta WHERE key = 'current_id'`).get()).toEqual({
         value: 'chief'
@@ -96,7 +96,7 @@ describe('RosterStore', () => {
     const store = new RosterStore(home)
     store.load()
     store.close()
-    const db = new Database(stateDbPath(home))
+    const db = new Database(homeAt(home).stateDb)
     db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('current_id', ?)`).run(
       LEGACY_LEAD_ID
     )
@@ -104,7 +104,7 @@ describe('RosterStore', () => {
     const repaired = new RosterStore(home)
     expect(repaired.load()).toEqual(chiefRoster())
     repaired.close()
-    const check = new Database(stateDbPath(home), { readonly: true, fileMustExist: true })
+    const check = new Database(homeAt(home).stateDb, { readonly: true, fileMustExist: true })
     try {
       expect(check.prepare(`SELECT value FROM meta WHERE key = 'current_id'`).get()).toEqual({
         value: 'chief'
@@ -126,7 +126,7 @@ describe('RosterStore', () => {
 
   it('ignores leftover current_uuid and writes current_id on load', () => {
     const home = tempHome()
-    const db = new Database(stateDbPath(home))
+    const db = new Database(homeAt(home).stateDb)
     db.exec(`
       CREATE TABLE IF NOT EXISTS teammates (
         id TEXT PRIMARY KEY,
@@ -146,7 +146,7 @@ describe('RosterStore', () => {
     expect(store.load()).toEqual(chiefRoster())
     store.close()
 
-    const check = new Database(stateDbPath(home), { readonly: true, fileMustExist: true })
+    const check = new Database(homeAt(home).stateDb, { readonly: true, fileMustExist: true })
     try {
       const rows = check.prepare(`SELECT key, value FROM meta ORDER BY key`).all() as {
         key: string
@@ -209,7 +209,7 @@ describe('RosterStore', () => {
     expect(() => store.hatch('Chief')).toThrow('Chief is already the lead')
     expect(store.load()).toEqual(chiefRoster())
     store.close()
-    const check = new Database(stateDbPath(home), { readonly: true, fileMustExist: true })
+    const check = new Database(homeAt(home).stateDb, { readonly: true, fileMustExist: true })
     try {
       expect(check.prepare(`SELECT id, name FROM teammates`).all()).toEqual([])
     } finally {
@@ -226,7 +226,7 @@ describe('RosterStore', () => {
 
   it('unknown select throws and does not write current_id', () => {
     const home = tempHome()
-    const db = new Database(stateDbPath(home))
+    const db = new Database(homeAt(home).stateDb)
     db.exec(`
       CREATE TABLE IF NOT EXISTS teammates (
         id TEXT PRIMARY KEY,
@@ -244,7 +244,7 @@ describe('RosterStore', () => {
     expect(() => store.select('nope')).toThrow('unknown bot')
     store.close()
 
-    const check = new Database(stateDbPath(home), { readonly: true, fileMustExist: true })
+    const check = new Database(homeAt(home).stateDb, { readonly: true, fileMustExist: true })
     try {
       expect(check.prepare(`SELECT value FROM meta WHERE key = 'current_id'`).get()).toEqual({
         value: 'ghost'

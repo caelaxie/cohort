@@ -1,10 +1,8 @@
-import { homedir } from 'node:os'
-import { join } from 'node:path'
 import { BrowserWindow, ipcMain } from 'electron'
 import { ApprovalStore } from './approval'
 import { Computer } from './computer'
 import { Kernel } from './kernel'
-import { defaultCohortHome } from './paths'
+import type { Layout } from './paths'
 import { primeTurn } from './prime'
 import { RosterStore } from './roster'
 import { TalkStore } from './talk'
@@ -15,21 +13,17 @@ function notifyApprovals(): void {
   }
 }
 
-export function registerIpc(): { quit: () => Promise<void> } {
-  const home = process.env.COHORT_HOME ?? defaultCohortHome()
-  const primeAuthPath = process.env.COHORT_HOME
-    ? join(home, 'prime', 'agent', 'auth.json')
-    : join(homedir(), '.prime', 'agent', 'auth.json')
-  const store = new RosterStore(home)
+export function registerIpc(layout: Layout): { quit: () => Promise<void> } {
+  const store = new RosterStore(layout.root)
   const kernel = new Kernel({
     env: process.env,
-    primeAuthPath
+    primeAuthPath: layout.primeAuth
   })
   const talk = new TalkStore({
-    home,
+    home: layout.root,
     known: (id) => store.known(id),
     turn: primeTurn({
-      home,
+      home: layout.root,
       endpoint: () => kernel.endpoint(),
       bot: (id) => {
         const found = store.bot(id)
@@ -41,7 +35,7 @@ export function registerIpc(): { quit: () => Promise<void> } {
     })
   })
   const approvals = new ApprovalStore({
-    home,
+    home: layout.root,
     known: (id) => store.known(id),
     onChange: notifyApprovals
   })

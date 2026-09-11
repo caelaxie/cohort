@@ -41,6 +41,6 @@ Preconditions:
 - First paint is always Chief. Wait for `doctor` before asserting the footer status line. The model line is missing until that status has loaded.
 - `fill --label` needs the field name inside a `<label>` that wraps the input. `Base URL`, `Model`, and `API key` are those fields.
 - There is one `Connect` button. It submits the form. The `xAI` and `OpenAI` buttons only fill Base URL and Model. They do not connect.
-- When `COHORT_HOME` is set, kernel auth is `$COHORT_HOME/prime/agent/auth.json`, not `~/.prime/agent/auth.json`. Unset `XAI_API_KEY` and `OPENAI_API_KEY` on launch or `probe-without-key` does not apply.
+- Scratch kernel auth is always `$COHORT_HOME/prime/agent/auth.json`. The owner's `~/.prime/agent/auth.json` is not written. Unset `XAI_API_KEY` and `OPENAI_API_KEY` on launch or `probe-without-key` does not apply.
 - Returning to Chief uses the Chief row, not Settings. Settings must not keep `aria-current` after that click.
 - Cmd+, in this recipe is a synthetic `KeyboardEvent` with `metaKey: true`. That hits the renderer listener. It does not click the application menu item.

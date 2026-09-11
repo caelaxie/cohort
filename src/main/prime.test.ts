@@ -15,7 +15,8 @@ import { CHIEF, parseTeammate } from '../shared/roster'
 import { parseMessageId } from '../shared/talk'
 import { botSystemPrompt, CHIEF_SYSTEM } from './chief-prompt'
 import type { Endpoint } from './kernel'
-import { assistantText, primeCatalogPath, primeTurn, type PrimeModule } from './prime'
+import { homeAt } from './paths'
+import { assistantText, primeTurn, type PrimeModule } from './prime'
 import { RosterStore } from './roster'
 import { TalkStore } from './talk'
 
@@ -317,7 +318,7 @@ describe('primeTurn', () => {
     await turn({ prior: emptyPrior, ownerBody: 'hello' })
     expect(keys).toEqual(['cohort:sk-test'])
     expect(readFileSync(authPath, 'utf8')).toBe(before)
-    const catalog = JSON.parse(readFileSync(primeCatalogPath(home), 'utf8')) as {
+    const catalog = JSON.parse(readFileSync(homeAt(home).primeCatalog, 'utf8')) as {
       providers: { cohort: Record<string, unknown> }
     }
     expect(catalog.providers.cohort.apiKey).toBeUndefined()
@@ -557,7 +558,7 @@ describe('primeTurn', () => {
             ownerBody: 'hello'
           })
         ).toEqual({ kind: 'ok', body: 'hi from Chief' })
-        const catalog = JSON.parse(readFileSync(primeCatalogPath(home), 'utf8')) as {
+        const catalog = JSON.parse(readFileSync(homeAt(home).primeCatalog, 'utf8')) as {
           providers: { cohort: Record<string, unknown> }
         }
         expect(catalog.providers.cohort.apiKey).toBeUndefined()

@@ -13,7 +13,7 @@ import {
 import { botSystemPrompt } from './chief-prompt'
 import { RosterStore } from './roster'
 import { openTalkDb } from './db'
-import { stateDbPath, talkDbPath } from './paths'
+import { homeAt } from './paths'
 import { turns } from './schema'
 import { TalkStore } from './talk'
 import { chiefKnown, ids, reply, talkHomes } from './talk-test-util'
@@ -177,7 +177,7 @@ describe('TalkStore', () => {
     expect(await talk.send({ botId: 'chief', body: '   ' })).toEqual({ kind: 'empty' })
     expect(talk.thread('chief')).toEqual({ botId: 'chief', turns: [] })
     talk.close()
-    expect(existsSync(talkDbPath(home))).toBe(true)
+    expect(existsSync(homeAt(home).talkDb)).toBe(true)
   })
 
   it('too-long body writes nothing', async () => {
@@ -287,7 +287,7 @@ describe('TalkStore', () => {
 
   it('renames leftover hatch bot_id rows to chief', () => {
     const home = tempHome()
-    const path = talkDbPath(home)
+    const path = homeAt(home).talkDb
     const seed = new Database(path)
     seed.exec(`
       CREATE TABLE turns (
@@ -324,7 +324,7 @@ describe('TalkStore', () => {
 
   it('does not rewrite a hatch teammate row after lead-id migration', () => {
     const home = tempHome()
-    const path = talkDbPath(home)
+    const path = homeAt(home).talkDb
     const seed = new Database(path)
     seed.exec(`
       CREATE TABLE turns (
@@ -444,8 +444,8 @@ describe('TalkStore', () => {
     })
     await talk.send({ botId: 'chief', body: 'hello' })
     talk.close()
-    expect(existsSync(stateDbPath(home))).toBe(false)
-    const db = new Database(talkDbPath(home), { readonly: true, fileMustExist: true })
+    expect(existsSync(homeAt(home).stateDb)).toBe(false)
+    const db = new Database(homeAt(home).talkDb, { readonly: true, fileMustExist: true })
     try {
       const names = db
         .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`)
