@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
-import { parseBotId, parseRoster } from '../shared/roster'
+import { LEGACY_LEAD_ID, parseBotId, parseRoster } from '../shared/roster'
 import { stateDbPath } from './paths'
 import { RosterStore } from './roster'
 
@@ -90,11 +90,21 @@ describe('RosterStore', () => {
     store.load()
     store.close()
     const db = new Database(stateDbPath(home))
-    db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('current_id', ?)`).run('hatch')
+    db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('current_id', ?)`).run(
+      LEGACY_LEAD_ID
+    )
     db.close()
     const repaired = new RosterStore(home)
     expect(repaired.load()).toEqual(chiefRoster())
     repaired.close()
+    const check = new Database(stateDbPath(home), { readonly: true, fileMustExist: true })
+    try {
+      expect(check.prepare(`SELECT value FROM meta WHERE key = 'current_id'`).get()).toEqual({
+        value: 'chief'
+      })
+    } finally {
+      check.close()
+    }
   })
 
   it('select chief when already current does not bump sqlite data_version', () => {

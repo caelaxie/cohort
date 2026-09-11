@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
-import { CHIEF_ID } from '../shared/roster'
+import { CHIEF_ID, LEGACY_LEAD_ID } from '../shared/roster'
 import { BODY_MAX, parseSendResult, parseThread } from '../shared/talk'
 import type { Turn } from './turn'
 import { openTalkDb } from './db'
@@ -319,7 +319,7 @@ describe('TalkStore', () => {
       .prepare(
         `INSERT INTO turns (owner_id, bot_id, owner_body, bot_line_id, bot_body, created_at) VALUES (?, ?, ?, ?, ?, ?)`
       )
-      .run('m1', 'hatch', 'hello', 'm2', 'hi from Chief', 1)
+      .run('m1', LEGACY_LEAD_ID, 'hello', 'm2', 'hi from Chief', 1)
     seed.close()
     const talk = new TalkStore({
       home,
@@ -336,6 +336,60 @@ describe('TalkStore', () => {
       ]
     })
     talk.close()
+  })
+
+  it('does not rewrite a hatch teammate row after lead-id migration', () => {
+    const home = tempHome()
+    const path = talkDbPath(home)
+    const seed = new Database(path)
+    seed.exec(`
+      CREATE TABLE turns (
+        owner_id TEXT PRIMARY KEY,
+        bot_id TEXT NOT NULL,
+        owner_body TEXT NOT NULL,
+        bot_line_id TEXT NOT NULL,
+        bot_body TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+    `)
+    seed
+      .prepare(
+        `INSERT INTO turns (owner_id, bot_id, owner_body, bot_line_id, bot_body, created_at) VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run('m1', LEGACY_LEAD_ID, 'hello', 'm2', 'hi from Chief', 1)
+    seed.close()
+    const first = openTalkDb(home)
+    first.$client.close()
+    const after = new Database(path)
+    after
+      .prepare(
+        `INSERT INTO turns (owner_id, bot_id, owner_body, bot_line_id, bot_body, created_at) VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run('m3', LEGACY_LEAD_ID, 'from hatch', 'm4', 'hi from Hatch', 2)
+    after.close()
+    const second = openTalkDb(home)
+    try {
+      expect(second.select().from(turns).all()).toEqual([
+        {
+          ownerId: 'm1',
+          botId: CHIEF_ID,
+          ownerBody: 'hello',
+          botLineId: 'm2',
+          botBody: 'hi from Chief',
+          createdAt: 1
+        },
+        {
+          ownerId: 'm3',
+          botId: LEGACY_LEAD_ID,
+          ownerBody: 'from hatch',
+          botLineId: 'm4',
+          botBody: 'hi from Hatch',
+          createdAt: 2
+        }
+      ])
+    } finally {
+      second.$client.close()
+    }
   })
 
   it('does not create a teammates table', async () => {

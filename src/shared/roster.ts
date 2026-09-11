@@ -1,4 +1,5 @@
 export const CHIEF_ID = 'chief' as const
+export const LEGACY_LEAD_ID = 'hatch' as const
 export type ChiefId = typeof CHIEF_ID
 export type TeammateId = string & { readonly __brand: 'TeammateId' }
 export type BotId = ChiefId | TeammateId
