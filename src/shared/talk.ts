@@ -170,12 +170,12 @@ export function paint(thread: Thread): readonly PaintedLine[] {
   return lines
 }
 
-export function sendCopy(result: Exclude<SendResult, { kind: 'ok' }>): string {
+export function sendCopy(result: Exclude<SendResult, { kind: 'ok' }>, botName: string): string {
   switch (result.kind) {
     case 'needs_login':
       return 'Connect a model in Settings'
     case 'busy':
-      return 'Chief is still answering'
+      return `${botName} is still answering`
     case 'empty':
       return 'Type a message'
     case 'too_long':

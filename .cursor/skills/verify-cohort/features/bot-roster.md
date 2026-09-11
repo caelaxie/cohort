@@ -33,4 +33,4 @@ Preconditions:
 
 - First paint is Chief before `home()` returns. Wait for `doctor` so the preload bridge has answered, not only for the window to appear.
 - Clicking Chief is a no-op write. Assert the same current id, not a new sqlite row.
-- There is no `New` button and no way to add a teammate in this slice. A snapshot that shows Workspaces, Add files, or a sandbox badge is leftover UI, not a missing fixture.
+- There is no sidebar `New` button. Hatch lives on the Chief pane (`Name` + `Hatch`). A snapshot that shows Workspaces, Add files, or a sandbox badge is leftover UI, not a missing fixture.

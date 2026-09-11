@@ -38,7 +38,7 @@ useEffect(() => {
 }, [])
 ```
 
-IPC: `cohort:home`, `cohort:select`. No push. No `list` / `create` / `addFiles`. No `BoxManager`.
+IPC: `cohort:home`, `cohort:select`, `cohort:hatch`, `cohort:remove`. No push. No `list` / `create` / `addFiles`. No `BoxManager`. Hatch writes a teammates row from an owner-chosen name and selects it. Remove deletes that row and repairs current to Chief. Chief cannot be hatched or removed.
 
 ## Shape
 
@@ -68,6 +68,8 @@ export type HomeView = {
 export type CohortApi = {
   home: () => Promise<unknown>
   select: (id: string) => Promise<unknown>
+  hatch: (name: string) => Promise<unknown>
+  remove: (id: string) => Promise<unknown>
 }
 ```
 
@@ -77,21 +79,21 @@ export type CohortApi = {
 `rosterBots(roster)` is `[chief, ...others]`.
 `currentBot(roster)` is paint-time. Talk can add a thread later.
 
-`RosterStore.load` reads `teammates` (empty this slice) and `meta.current_id`. Missing or dangling current, including leftover `current_uuid`, repairs to `'chief'`. Chief is never a teammates row. `select` throws on unknown ids and skips the meta write when already current.
+`RosterStore.load` reads `teammates` and `meta.current_id`. Missing or dangling current, including leftover `current_uuid`, repairs to `'chief'`. Chief is never a teammates row. `select` throws on unknown ids and skips the meta write when already current. `hatch(name)` inserts a teammate (id slugged from the owner-chosen name; `hatch` is a valid teammate id) and selects it. `remove` deletes a teammate and repairs current to Chief. Chief cannot be hatched or removed.
 
 ## Module map
 
 - `src/shared/roster.ts` — types, CHIEF, parse, helpers
 - `src/main/schema.ts` + `db.ts` — `teammates` + `meta`. No `workspaces` on the live path.
 - `src/main/roster.ts` — `RosterStore`
-- `src/main/ipc.ts` — `home` / `select`
+- `src/main/ipc.ts` — `home` / `select` / `hatch` / `remove`
 - `src/preload/index.ts` — allowlist, payloads stay unknown
 - `src/renderer/src/App.tsx` — `chiefOnlyRoster()` first paint
 - `src/renderer/src/components/bot-sidebar.tsx` — heading Crew, Chief first, `aria-current="page"`
-- `src/renderer/src/components/bot-main.tsx` — `h1` is current bot name, empty pane, no composer, no sandbox, no add-files
+- `src/renderer/src/components/bot-main.tsx` — `h1` is current bot name; Chief pane has Name + Hatch; a hatched pane has Remove
 
 Delete from the tree: `workspaces.ts`, `files.ts`, `box.ts`, `live-box.ts`, `app-state.ts`, `shared/workspace.ts`, workspace renderer components, their tests, `notice.ts`. Update `paths.ts` so live code does not mention workspace dirs. Update verify-cohort so `doctor` and `state` call `home()`, not `list()`.
 
 ## Tests
 
-`src/main/roster.test.ts` asserts empty roster, reopen, dangling current repair, and select-Chief is a no-op write. `parseRoster` throws without Chief and on Chief in `others`.
+`src/main/roster.test.ts` asserts empty roster, reopen, dangling current repair, select-Chief is a no-op write, hatch, and remove. `parseRoster` throws without Chief and on Chief in `others`.

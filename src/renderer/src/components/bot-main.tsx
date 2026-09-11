@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { readyForTalk, type KernelStatus } from '../../../shared/kernel'
-import { currentBot, type Roster } from '../../../shared/roster'
+import { CHIEF_ID, currentBot, type Roster } from '../../../shared/roster'
 import {
   emptyThread,
   paint,
@@ -13,16 +13,19 @@ import {
 type Props = {
   roster: Roster
   kernelStatus: KernelStatus
+  onHatch: (name: string) => void
+  onRemove: (id: string) => void
 }
 
 function fail(reason: unknown, fallback: string): string {
   return reason instanceof Error ? reason.message : fallback
 }
 
-export function BotMain({ roster, kernelStatus }: Props): React.JSX.Element {
+export function BotMain({ roster, kernelStatus, onHatch, onRemove }: Props): React.JSX.Element {
   const bot = currentBot(roster)
   const [thread, setThread] = useState<Thread>(() => emptyThread(bot.id))
   const [draft, setDraft] = useState('')
+  const [hatchName, setHatchName] = useState('')
   const [busy, setBusy] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
 
@@ -52,7 +55,7 @@ export function BotMain({ roster, kernelStatus }: Props): React.JSX.Element {
         setDraft('')
         return
       }
-      setSendError(sendCopy(result))
+      setSendError(sendCopy(result, bot.name))
     } catch (reason: unknown) {
       setSendError(fail(reason, 'Could not send'))
     } finally {
@@ -70,6 +73,49 @@ export function BotMain({ roster, kernelStatus }: Props): React.JSX.Element {
           {bot.name}
         </h1>
       </header>
+
+      {bot.id === CHIEF_ID ? (
+        <form
+          className="flex shrink-0 flex-wrap items-end gap-3 border-b border-hairline px-6 py-3"
+          onSubmit={(event) => {
+            event.preventDefault()
+            const name = hatchName.trim()
+            if (name.length === 0) return
+            onHatch(name)
+          }}
+        >
+          <label className="flex min-w-0 flex-1 flex-col gap-1.5 text-sm text-ink">
+            Name
+            <input
+              type="text"
+              value={hatchName}
+              className="rounded-md border border-hairline bg-canvas px-3 py-2 text-sm text-ink"
+              onChange={(event) => {
+                setHatchName(event.target.value)
+              }}
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={hatchName.trim().length === 0}
+            className="rounded-md bg-primary px-3.5 py-2 text-sm font-medium text-on-primary hover:bg-primary-hover disabled:opacity-50"
+          >
+            Hatch
+          </button>
+        </form>
+      ) : (
+        <div className="shrink-0 border-b border-hairline px-6 py-3">
+          <button
+            type="button"
+            className="rounded-md border border-hairline bg-surface-1 px-3.5 py-2 text-sm font-medium text-ink hover:bg-surface-2"
+            onClick={() => {
+              onRemove(bot.id)
+            }}
+          >
+            Remove
+          </button>
+        </div>
+      )}
 
       <ul className="flex min-h-0 flex-1 flex-col overflow-auto px-6 py-4">
         {lines.map((line) => (

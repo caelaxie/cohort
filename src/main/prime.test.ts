@@ -11,7 +11,9 @@ import {
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { CHIEF, parseTeammate } from '../shared/roster'
 import { parseMessageId } from '../shared/talk'
+import { botSystemPrompt, CHIEF_SYSTEM } from './chief-prompt'
 import type { Endpoint } from './kernel'
 import { assistantText, primeCatalogPath, primeTurn, type PrimeModule } from './prime'
 
@@ -45,6 +47,7 @@ function fakeModule(options?: {
 }): {
   module: PrimeModule
   prompts: string[]
+  systemPrompts: string[]
   seeded: unknown[]
   keys: string[]
   aborted: number
@@ -53,6 +56,7 @@ function fakeModule(options?: {
   subscribed: number
 } {
   const prompts: string[] = []
+  const systemPrompts: string[] = []
   const seeded: unknown[] = []
   const keys: string[] = []
   let aborted = 0
@@ -130,6 +134,11 @@ function fakeModule(options?: {
       inMemory: (cwd?: string) => ({ cwd })
     },
     DefaultResourceLoader: class {
+      constructor(options?: { systemPrompt?: string }) {
+        if (typeof options?.systemPrompt === 'string') {
+          systemPrompts.push(options.systemPrompt)
+        }
+      }
       async reload(): Promise<void> {
         return
       }
@@ -141,6 +150,7 @@ function fakeModule(options?: {
   return {
     module,
     prompts,
+    systemPrompts,
     seeded,
     keys,
     get aborted() {
@@ -186,6 +196,7 @@ describe('primeTurn', () => {
     const home = tempHome()
     const fake = fakeModule()
     const turn = primeTurn({
+      bot: () => CHIEF,
       home,
       endpoint: async () => endpoint,
       load: async () => fake.module
@@ -197,13 +208,35 @@ describe('primeTurn', () => {
       })
     ).toEqual({ kind: 'ok', body: 'hi from Chief' })
     expect(fake.prompts).toEqual(['hello'])
+    expect(fake.systemPrompts).toEqual([CHIEF_SYSTEM])
     expect(fake.keys).toEqual(['cohort:sk-test'])
     expect(fake.subscribed).toBe(0)
+  })
+
+  it('uses the hatched bot name in the system prompt', async () => {
+    const scout = parseTeammate({ id: 'scout', name: 'Scout' })
+    const fake = fakeModule({ reply: 'hi from Scout' })
+    const turn = primeTurn({
+      bot: (id) => (id === scout.id ? scout : CHIEF),
+      home: tempHome(),
+      endpoint: async () => endpoint,
+      load: async () => fake.module
+    })
+    expect(
+      await turn({
+        prior: { botId: scout.id, turns: [] },
+        ownerBody: 'hello'
+      })
+    ).toEqual({ kind: 'ok', body: 'hi from Scout' })
+    expect(fake.systemPrompts).toEqual([botSystemPrompt(scout)])
+    expect(fake.systemPrompts[0]?.includes('You are Scout')).toBe(true)
+    expect(fake.systemPrompts[0]?.includes('You are Chief')).toBe(false)
   })
 
   it('seeds prior turns into the session before the new prompt', async () => {
     const { module, prompts, seeded } = fakeModule()
     const turn = primeTurn({
+      bot: () => CHIEF,
       home: tempHome(),
       endpoint: async () => endpoint,
       load: async () => module
@@ -233,6 +266,7 @@ describe('primeTurn', () => {
   it('returns needs_login and does not load Prime', async () => {
     let loaded = false
     const turn = primeTurn({
+      bot: () => CHIEF,
       home: tempHome(),
       endpoint: async () => null,
       load: async () => {
@@ -249,6 +283,7 @@ describe('primeTurn', () => {
   it('opens a one-shot session and disposes it after each turn', async () => {
     const fake = fakeModule()
     const turn = primeTurn({
+      bot: () => CHIEF,
       home: tempHome(),
       endpoint: async () => endpoint,
       load: async () => fake.module
@@ -272,6 +307,7 @@ describe('primeTurn', () => {
     const before = readFileSync(authPath, 'utf8')
     const { module, keys } = fakeModule()
     const turn = primeTurn({
+      bot: () => CHIEF,
       home,
       endpoint: async () => endpoint,
       load: async () => module
@@ -295,6 +331,7 @@ describe('primeTurn', () => {
       }
     })
     const turn = primeTurn({
+      bot: () => CHIEF,
       home: tempHome(),
       endpoint: async () => endpoint,
       load: async () => module
@@ -315,6 +352,7 @@ describe('primeTurn', () => {
       }
     })
     const turn = primeTurn({
+      bot: () => CHIEF,
       home: tempHome(),
       endpoint: async () => endpoint,
       load: async () => fake.module
@@ -331,6 +369,7 @@ describe('primeTurn', () => {
       prompt: async () => undefined
     })
     const turn = primeTurn({
+      bot: () => CHIEF,
       home: tempHome(),
       endpoint: async () => endpoint,
       load: async () => module
@@ -350,6 +389,7 @@ describe('primeTurn', () => {
       create: () => held
     })
     const turn = primeTurn({
+      bot: () => CHIEF,
       home: tempHome(),
       endpoint: async () => endpoint,
       load: async () => fake.module,
@@ -375,6 +415,7 @@ describe('primeTurn', () => {
         })
     })
     const turn = primeTurn({
+      bot: () => CHIEF,
       home: tempHome(),
       endpoint: async () => endpoint,
       load: async () => fake.module,
@@ -414,6 +455,7 @@ describe('primeTurn', () => {
       })
       try {
         const turn = primeTurn({
+          bot: () => CHIEF,
           home,
           endpoint: async () => ({
             model: 'mock-hatch',

@@ -78,7 +78,27 @@ function App(): React.JSX.Element {
         }}
       />
       <div className={settingsOpen ? 'hidden min-w-0 flex-1' : 'flex min-w-0 flex-1'}>
-        <BotMain key={view.roster.current} roster={view.roster} kernelStatus={kernelStatus} />
+        <BotMain
+          key={view.roster.current}
+          roster={view.roster}
+          kernelStatus={kernelStatus}
+          onHatch={(name) => {
+            void window.cohort
+              .hatch(name)
+              .then((raw) => setView(viewWith(parseRoster(raw))))
+              .catch((reason: unknown) => {
+                setView((prev) => viewWith(prev.roster, fail(reason, 'Could not hatch')))
+              })
+          }}
+          onRemove={(id) => {
+            void window.cohort
+              .remove(id)
+              .then((raw) => setView(viewWith(parseRoster(raw))))
+              .catch((reason: unknown) => {
+                setView((prev) => viewWith(prev.roster, fail(reason, 'Could not remove')))
+              })
+          }}
+        />
       </div>
       {settingsOpen ? (
         <SettingsPane

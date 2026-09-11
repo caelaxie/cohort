@@ -22,12 +22,21 @@ export function registerIpc(): { quit: () => Promise<void> } {
     known: (id) => store.known(id),
     turn: primeTurn({
       home,
-      endpoint: () => kernel.endpoint()
+      endpoint: () => kernel.endpoint(),
+      bot: (id) => {
+        const found = store.bot(id)
+        if (!found) {
+          throw new Error('unknown bot')
+        }
+        return found
+      }
     })
   })
 
   ipcMain.handle('cohort:home', () => store.load())
   ipcMain.handle('cohort:select', (_event, id: unknown) => store.select(id))
+  ipcMain.handle('cohort:hatch', (_event, name: unknown) => store.hatch(name))
+  ipcMain.handle('cohort:remove', (_event, id: unknown) => store.remove(id))
   ipcMain.handle('cohort:kernel', () => kernel.status())
   ipcMain.handle('cohort:connect', (_event, input: unknown) => kernel.connect(input))
   ipcMain.handle('cohort:thread', (_event, id: unknown) => talk.thread(id))
