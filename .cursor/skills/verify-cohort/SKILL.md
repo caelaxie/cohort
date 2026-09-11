@@ -96,6 +96,7 @@ Proof artifacts go in `$RUN_ROOT/evidence/` and survive cleanup. For every featu
    - Roster DB: `sqlite3 "$RUN_ROOT/home/state.sqlite" "SELECT key, value FROM meta; SELECT id, name FROM teammates;"`.
    - Talk DB: `sqlite3 "$RUN_ROOT/home/talk.sqlite" "SELECT owner_body, bot_body FROM turns ORDER BY created_at, owner_id;"`.
    - Room DB: `sqlite3 "$RUN_ROOT/home/talk.sqlite" "SELECT speaker_kind, speaker_bot_id, body FROM room_lines ORDER BY n;"`.
+   - Approval DB: `sqlite3 "$RUN_ROOT/home/approval.sqlite" "SELECT bot_id, action, summary, payload, decision FROM approval_audit ORDER BY decided_at, id;"`.
    - Kernel auth when `COHORT_HOME` is set: `$RUN_ROOT/home/prime/agent/auth.json`. Never the owner's `~/.prime/agent/auth.json`.
 4. Name artifacts after the feature and step, e.g. `bot-roster/after.png`.
 

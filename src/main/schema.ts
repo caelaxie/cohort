@@ -28,5 +28,27 @@ export const roomLines = sqliteTable('room_lines', {
   createdAt: integer('created_at').notNull()
 })
 
+export const pendingApprovals = sqliteTable('pending_approvals', {
+  id: text('id').primaryKey(),
+  botId: text('bot_id').notNull(),
+  action: text('action').notNull(),
+  summary: text('summary').notNull(),
+  payload: text('payload').notNull(),
+  createdAt: integer('created_at').notNull()
+})
+
+export const approvalAudit = sqliteTable('approval_audit', {
+  id: text('id').primaryKey(),
+  requestId: text('request_id').notNull(),
+  botId: text('bot_id').notNull(),
+  action: text('action').notNull(),
+  summary: text('summary').notNull(),
+  payload: text('payload').notNull(),
+  decision: text('decision').notNull(),
+  requestedAt: integer('requested_at').notNull(),
+  decidedAt: integer('decided_at').notNull()
+})
+
 export const schema = { teammates, meta }
 export const talkSchema = { turns, roomLines }
+export const approvalSchema = { pendingApprovals, approvalAudit }

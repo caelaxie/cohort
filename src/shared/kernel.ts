@@ -1,3 +1,5 @@
+import { isRecord, rejectSecrets } from './parse'
+
 export type KernelStatus =
   | { readonly kind: 'needs_login' }
   | { readonly kind: 'ready'; readonly model: string; readonly baseUrl: string }
@@ -19,12 +21,6 @@ export const ENDPOINT_PRESETS = [
   }
 ] as const
 
-const SECRET_FIELDS = ['key', 'apiKey', 'token', 'secret', 'access', 'password'] as const
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 export function readyForTalk(
   status: KernelStatus
 ): status is Extract<KernelStatus, { kind: 'ready' }> {
@@ -35,11 +31,7 @@ export function parseKernelStatus(value: unknown): KernelStatus {
   if (!isRecord(value)) {
     throw new Error('invalid kernel status')
   }
-  for (const field of SECRET_FIELDS) {
-    if (field in value) {
-      throw new Error('secret field')
-    }
-  }
+  rejectSecrets(value)
   if (value.kind === 'needs_login') {
     return { kind: 'needs_login' }
   }

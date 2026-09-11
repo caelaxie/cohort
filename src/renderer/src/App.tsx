@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react'
+import { ApprovalPrompt } from '@/components/approval-prompt'
 import { BotSidebar } from '@/components/bot-sidebar'
 import { BotMain } from '@/components/bot-main'
 import { RoomMain } from '@/components/room-main'
 import { SettingsPane } from '@/components/settings-pane'
+import { parseApprovals, type Approvals } from '../../shared/approval'
 import { parseKernelStatus, type KernelStatus } from '../../shared/kernel'
 import {
   chiefOnlyRoster,
   parseBotId,
   parseRoster,
+  rosterBots,
   viewWith,
   type HomeView
 } from '../../shared/roster'
@@ -34,6 +37,7 @@ function App(): React.JSX.Element {
   const [kernelStatus, setKernelStatus] = useState<KernelStatus>({ kind: 'needs_login' })
   const [kernelError, setKernelError] = useState<string | null>(null)
   const [running, setRunning] = useState<readonly Running[]>([])
+  const [approvals, setApprovals] = useState<Approvals>({ pending: [], audit: [] })
 
   useEffect(() => {
     if (!window.cohort) return
@@ -56,6 +60,10 @@ function App(): React.JSX.Element {
       .coordination()
       .then((raw) => setRunning(parseCoordination(raw).running))
       .catch(() => undefined)
+    void window.cohort
+      .approvals()
+      .then((raw) => setApprovals(parseApprovals(raw)))
+      .catch(() => undefined)
   }, [])
 
   useEffect(() => {
@@ -74,6 +82,16 @@ function App(): React.JSX.Element {
     if (!window.cohort) return
     return window.cohort.onOpenSettings(() => {
       setSettingsOpen(true)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!window.cohort) return
+    return window.cohort.onApprovalsChanged(() => {
+      void window.cohort
+        .approvals()
+        .then((raw) => setApprovals(parseApprovals(raw)))
+        .catch(() => undefined)
     })
   }, [])
 
@@ -207,6 +225,19 @@ function App(): React.JSX.Element {
           }}
         />
       ) : null}
+      <ApprovalPrompt
+        pending={approvals.pending}
+        nameFor={(id) => rosterBots(view.roster).find((item) => item.id === id)?.name ?? id}
+        onApprove={(id) => {
+          void window.cohort.approve(id).catch(() => undefined)
+        }}
+        onDeny={(id) => {
+          void window.cohort.deny(id).catch(() => undefined)
+        }}
+        onDismiss={() => {
+          void window.cohort.denyAll().catch(() => undefined)
+        }}
+      />
     </div>
   )
 }

@@ -19,7 +19,7 @@ Authority for v1 behavior: this file.
 - [ ] This Mac is the computer while Cohort is open
 - [ ] Closing Cohort stops the bots
 - [ ] Bots use the browser you are already logged into (one shared login)
-- [ ] Ask first before send, post, buy, or delete. Only you approve
+- [x] Ask first before send, post, buy, or delete. Only you approve
 - [x] Prime Agent embedded as the kernel (not the Prime CLI)
 - [ ] Bring your own model subscriptions; no Cohort weekly cap
 - [ ] Use it on a real job of your own
