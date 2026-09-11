@@ -16,9 +16,9 @@ Authority for v1 behavior: this file.
 - [x] Chief can hatch another named bot
 - [x] Chief can coordinate other bots
 - [x] Shared room: you, Chief, and other bots in one thread
-- [ ] This Mac is the computer while Cohort is open
-- [ ] Closing Cohort stops the bots
-- [ ] Bots use the browser you are already logged into (one shared login)
+- [x] This Mac is the computer while Cohort is open
+- [x] Closing Cohort stops the bots
+- [x] Bots use the browser you are already logged into (one shared login)
 - [x] Ask first before send, post, buy, or delete. Only you approve
 - [x] Prime Agent embedded as the kernel (not the Prime CLI)
 - [ ] Bring your own model subscriptions; no Cohort weekly cap
