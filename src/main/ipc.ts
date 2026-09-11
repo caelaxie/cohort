@@ -1,25 +1,29 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { ipcMain } from 'electron'
-import { completionsTurn } from './completions'
 import { Kernel } from './kernel'
 import { defaultCohortHome } from './paths'
+import { primeTurn } from './prime'
 import { RosterStore } from './roster'
 import { TalkStore } from './talk'
 
 export function registerIpc(): { quit: () => Promise<void> } {
   const home = process.env.COHORT_HOME ?? defaultCohortHome()
+  const primeAuthPath = process.env.COHORT_HOME
+    ? join(home, 'prime', 'agent', 'auth.json')
+    : join(homedir(), '.prime', 'agent', 'auth.json')
   const store = new RosterStore(home)
   const kernel = new Kernel({
     env: process.env,
-    primeAuthPath: process.env.COHORT_HOME
-      ? join(home, 'prime', 'agent', 'auth.json')
-      : join(homedir(), '.prime', 'agent', 'auth.json')
+    primeAuthPath
   })
   const talk = new TalkStore({
     home,
     known: (id) => store.known(id),
-    turn: completionsTurn({ endpoint: () => kernel.endpoint() })
+    turn: primeTurn({
+      home,
+      endpoint: () => kernel.endpoint()
+    })
   })
 
   ipcMain.handle('cohort:home', () => store.load())
