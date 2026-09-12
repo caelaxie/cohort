@@ -1,10 +1,8 @@
-import { homedir } from 'node:os'
-import { join } from 'node:path'
 import { BrowserWindow, ipcMain } from 'electron'
 import { ApprovalStore } from './approval'
 import { Computer } from './computer'
 import { Kernel } from './kernel'
-import { defaultCohortHome } from './paths'
+import { primeAuthPath } from './paths'
 import { primeTurn } from './prime'
 import { RosterStore } from './roster'
 import { TalkStore } from './talk'
@@ -15,15 +13,11 @@ function notifyApprovals(): void {
   }
 }
 
-export function registerIpc(): { quit: () => Promise<void> } {
-  const home = process.env.COHORT_HOME ?? defaultCohortHome()
-  const primeAuthPath = process.env.COHORT_HOME
-    ? join(home, 'prime', 'agent', 'auth.json')
-    : join(homedir(), '.prime', 'agent', 'auth.json')
+export function registerIpc(home: string): { quit: () => Promise<void> } {
   const store = new RosterStore(home)
   const kernel = new Kernel({
     env: process.env,
-    primeAuthPath
+    primeAuthPath: primeAuthPath(home)
   })
   const talk = new TalkStore({
     home,

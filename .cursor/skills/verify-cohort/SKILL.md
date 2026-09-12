@@ -23,10 +23,10 @@ From the repo root:
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 PORT=$((9000 + RANDOM % 900))
 RUN_ROOT="$TMPDIR/cohort-verify/$RUN_ID"
-mkdir -p "$RUN_ROOT/home" "$RUN_ROOT/user-data" "$RUN_ROOT/evidence"
+mkdir -p "$RUN_ROOT/home" "$RUN_ROOT/evidence"
 
 COHORT_HOME="$RUN_ROOT/home" \
-ELECTRON_CLI_ARGS="[\"--user-data-dir=$RUN_ROOT/user-data\"]" \
+ELECTRON_CLI_ARGS="[\"--user-data-dir=$RUN_ROOT/home/electron\"]" \
 REMOTE_DEBUGGING_PORT=$PORT \
 pnpm dev > "$RUN_ROOT/app.log" 2>&1 &
 echo $! > "$RUN_ROOT/launch.pid"
@@ -34,7 +34,7 @@ echo "$RUN_ROOT $PORT"
 ```
 
 - Run the launch as a background job that outlives the command. In Cursor, use the Shell tool's background mode, not a bare `&`, which gets reaped when the tool call returns.
-- `COHORT_HOME` isolates app data (roster DB) and Electron's profile (`$COHORT_HOME/electron`), which is the single-instance lock. `--user-data-dir` is still passed so Chromium isolation matches if the flag is honored. Without a scratch `COHORT_HOME` the app can refuse to start or focus another instance.
+- `COHORT_HOME` isolates app data (roster DB) and Electron's profile (`$COHORT_HOME/electron`), which is the single-instance lock. Pass `--user-data-dir=$COHORT_HOME/electron` so Chromium uses that same directory. Without a scratch `COHORT_HOME` the app can refuse to start or focus another instance.
 - Ready signal: `curl -s http://127.0.0.1:$PORT/json/list` returns a `page` target titled `Cohort` (usually 3–8 s; the dev server must build main, preload, and renderer first).
 - A real window opens on screen. That is expected; cleanup closes it.
 - `pnpm dev` watches sources and restarts the main process on edits. Do not edit `src/` while an instance is up.
@@ -97,7 +97,7 @@ Proof artifacts go in `$RUN_ROOT/evidence/` and survive cleanup. For every featu
    - Talk DB: `sqlite3 "$RUN_ROOT/home/talk.sqlite" "SELECT owner_body, bot_body FROM turns ORDER BY created_at, owner_id;"`.
    - Room DB: `sqlite3 "$RUN_ROOT/home/talk.sqlite" "SELECT speaker_kind, speaker_bot_id, body FROM room_lines ORDER BY n;"`.
    - Approval DB: `sqlite3 "$RUN_ROOT/home/approval.sqlite" "SELECT bot_id, action, summary, payload, decision FROM approval_audit ORDER BY decided_at, id;"`.
-   - Kernel auth when `COHORT_HOME` is set: `$RUN_ROOT/home/prime/agent/auth.json`. Never the owner's `~/.prime/agent/auth.json`.
+   - Kernel auth: `$COHORT_HOME/prime/agent/auth.json` (`$RUN_ROOT/home/prime/agent/auth.json`). Never the owner's `~/.prime/agent/auth.json`.
 4. Name artifacts after the feature and step, e.g. `bot-roster/after.png`.
 
 Proof standards:
@@ -112,12 +112,12 @@ Teardown removes the instance and scratch app state. It never removes evidence.
 ```sh
 kill "$(cat "$RUN_ROOT/launch.pid")" 2>/dev/null
 sleep 1
-pkill -f "$RUN_ROOT" 2>/dev/null   # electron children carry --user-data-dir=$RUN_ROOT/...
+pkill -f "$RUN_ROOT" 2>/dev/null   # electron children carry --user-data-dir=$RUN_ROOT/home/electron
 for i in 1 2 3 4 5; do
   curl -s --max-time 1 "http://127.0.0.1:$PORT/json/list" >/dev/null || break
   sleep 1
 done
-rm -rf "$RUN_ROOT/home" "$RUN_ROOT/user-data"
+rm -rf "$RUN_ROOT/home"
 echo "evidence kept at $RUN_ROOT/evidence"
 ```
 

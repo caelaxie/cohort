@@ -4,7 +4,7 @@ This directory is the maintained source for verifying the user-facing behavior o
 
 ## Baseline preconditions
 
-- Instance launched per `../SKILL.md` with scratch `COHORT_HOME=$RUN_ROOT/home`, `--user-data-dir=$RUN_ROOT/user-data`, and `REMOTE_DEBUGGING_PORT=$PORT`.
+- Instance launched per `../SKILL.md` with scratch `COHORT_HOME=$RUN_ROOT/home`, `--user-data-dir=$RUN_ROOT/home/electron`, and `REMOTE_DEBUGGING_PORT=$PORT`.
 - `doctor` passed and the recorded launch PID is alive.
 - `$RUN_ROOT` is under `$TMPDIR/cohort-verify/`. Never use the user's real `~/.cohort`.
 - Chief exists. No workspace exists.
