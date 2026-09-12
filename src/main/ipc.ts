@@ -2,7 +2,7 @@ import { BrowserWindow, ipcMain } from 'electron'
 import { ApprovalStore } from './approval'
 import { Computer } from './computer'
 import { Kernel } from './kernel'
-import type { Layout } from './paths'
+import { primeAuthPath } from './paths'
 import { primeTurn } from './prime'
 import { RosterStore } from './roster'
 import { TalkStore } from './talk'
@@ -13,17 +13,17 @@ function notifyApprovals(): void {
   }
 }
 
-export function registerIpc(layout: Layout): { quit: () => Promise<void> } {
-  const store = new RosterStore(layout.root)
+export function registerIpc(home: string): { quit: () => Promise<void> } {
+  const store = new RosterStore(home)
   const kernel = new Kernel({
     env: process.env,
-    primeAuthPath: layout.primeAuth
+    primeAuthPath: primeAuthPath(home)
   })
   const talk = new TalkStore({
-    home: layout.root,
+    home,
     known: (id) => store.known(id),
     turn: primeTurn({
-      home: layout.root,
+      home,
       endpoint: () => kernel.endpoint(),
       bot: (id) => {
         const found = store.bot(id)
@@ -35,7 +35,7 @@ export function registerIpc(layout: Layout): { quit: () => Promise<void> } {
     })
   })
   const approvals = new ApprovalStore({
-    home: layout.root,
+    home,
     known: (id) => store.known(id),
     onChange: notifyApprovals
   })

@@ -1,11 +1,11 @@
 import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { AgentSession } from '@earendil-works/pi-coding-agent'
 import type { Bot, BotId } from '../shared/roster'
 import type { Thread } from '../shared/talk'
 import { botSystemPrompt } from './chief-prompt'
 import type { Endpoint } from './kernel'
-import { botWork, homeAt } from './paths'
+import { primeWorkDir } from './paths'
 import type { Turn, TurnResult } from './turn'
 
 type PrimeMessage = AgentSession['messages'][number]
@@ -131,6 +131,10 @@ async function writeCatalog(modelsPath: string, endpoint: Endpoint): Promise<voi
 
 const defaultLoad = (): Promise<PrimeModule> => import('@earendil-works/pi-coding-agent')
 
+export function primeCatalogPath(home: string): string {
+  return join(home, 'prime', 'agent', 'models.json')
+}
+
 export function primeTurn(options: {
   readonly endpoint: () => Promise<Endpoint | null>
   readonly home: string
@@ -192,14 +196,13 @@ export function primeTurn(options: {
 
     async function openTurn(endpoint: Endpoint): Promise<TurnResult> {
       const module = await load()
-      const paths = homeAt(options.home)
-      const cwd = botWork(paths.root, input.prior.botId)
-      const modelsPath = paths.primeCatalog
-      const agentDir = dirname(modelsPath)
+      const cwd = primeWorkDir(options.home, input.prior.botId)
+      const agentDir = dirname(primeCatalogPath(options.home))
+      const modelsPath = primeCatalogPath(options.home)
       await mkdir(cwd, { recursive: true })
       await writeCatalog(modelsPath, endpoint)
       const modelRuntime = await module.ModelRuntime.create({
-        authPath: paths.primeRuntimeAuth,
+        authPath: join(agentDir, 'runtime-auth.json'),
         modelsPath,
         refreshOnCreate: false,
         allowModelNetwork: false

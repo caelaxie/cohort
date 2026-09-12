@@ -3,10 +3,10 @@ import { app, shell, BrowserWindow, Menu } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { registerIpc } from './ipc'
-import { resolveHome } from './paths'
+import { electronUserData, resolveHome } from './paths'
 
-const layout = resolveHome(process.env)
-app.setPath('userData', layout.electron)
+const home = resolveHome(process.env)
+app.setPath('userData', electronUserData(home))
 
 let shutdown: (() => Promise<void>) | null = null
 
@@ -89,7 +89,7 @@ if (!gotLock) {
       optimizer.watchWindowShortcuts(window)
     })
 
-    const session = registerIpc(layout)
+    const session = registerIpc(home)
     shutdown = session.quit
     installMenu()
     createWindow()
