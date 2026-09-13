@@ -140,149 +140,164 @@ export function primeCatalogPath(home: string): string {
   return join(home, 'prime', 'agent', 'models.json')
 }
 
+export type PrimeKernel = {
+  readonly turn: Turn
+  readonly roomTurn: Turn
+  close(): void
+}
+
 export function primeTurn(options: {
   readonly endpoint: () => Promise<Endpoint | null>
   readonly home: string
   readonly bot: (id: BotId) => Bot
   readonly load?: () => Promise<PrimeModule>
   readonly timeoutMs?: number
-}): Turn & { close(): void } {
+}): PrimeKernel {
   const load = options.load ?? defaultLoad
   const timeoutMs = options.timeoutMs ?? TURN_MS
   const live = new Map<string, LiveSession>()
 
-  const close = (): void => {
-    for (const item of live.values()) {
-      item.session.dispose()
-    }
-    live.clear()
+  const drop = (slot: string): void => {
+    const item = live.get(slot)
+    if (item === undefined) return
+    item.session.dispose()
+    live.delete(slot)
   }
 
-  const run: Turn = async (input) => {
-    const channel = input.channel ?? 'dm'
-    const slot = `${channel}:${input.prior.botId}`
-    let session: AgentSession | undefined
-    let timedOut = false
-    let stopped = false
-    let rejectDeadline: ((reason: Error) => void) | undefined
-    const deadline = new Promise<never>((_, reject) => {
-      rejectDeadline = reject
-    })
-    const onAbort = (): void => {
-      stopped = true
-      void session?.abort()
-      rejectDeadline?.(stoppedError())
-    }
-    input.signal?.addEventListener('abort', onAbort, { once: true })
-    if (input.signal?.aborted) {
-      input.signal.removeEventListener('abort', onAbort)
-      return { kind: 'stopped' }
-    }
+  const close = (): void => {
+    for (const slot of [...live.keys()]) drop(slot)
+  }
 
-    const timer = setTimeout(() => {
-      timedOut = true
-      void session?.abort()
-      rejectDeadline?.(timeoutError())
-    }, timeoutMs)
-
-    let opened: Promise<TurnResult> | undefined
-    try {
-      const ready = await Promise.race([options.endpoint(), deadline])
-      if (stopped || input.signal?.aborted) {
+  const bind = (channel: 'dm' | 'room'): Turn => {
+    return async (input) => {
+      const slot = `${channel}:${input.prior.botId}`
+      let session: AgentSession | undefined
+      let timedOut = false
+      let stopped = false
+      let rejectDeadline: ((reason: Error) => void) | undefined
+      const deadline = new Promise<never>((_, reject) => {
+        rejectDeadline = reject
+      })
+      const onAbort = (): void => {
+        stopped = true
+        void session?.abort()
+        rejectDeadline?.(stoppedError())
+      }
+      input.signal?.addEventListener('abort', onAbort, { once: true })
+      if (input.signal?.aborted) {
+        input.signal.removeEventListener('abort', onAbort)
         return { kind: 'stopped' }
       }
-      if (ready === null) {
-        return { kind: 'needs_login' }
-      }
-      opened = openTurn(ready)
-      const result = await Promise.race([opened, deadline])
-      if (stopped || input.signal?.aborted) {
-        return { kind: 'stopped' }
-      }
-      return result
-    } catch (reason: unknown) {
-      if (timedOut && session !== undefined) {
-        session.dispose()
-        live.delete(slot)
-        session = undefined
-      }
-      return failed(reason, stopped || input.signal?.aborted === true)
-    } finally {
-      clearTimeout(timer)
-      input.signal?.removeEventListener('abort', onAbort)
-      void opened?.catch(() => undefined)
-    }
 
-    async function openTurn(endpoint: Endpoint): Promise<TurnResult> {
-      const fingerprint = `${endpoint.baseUrl}\n${endpoint.model}`
-      const existing = live.get(slot)
-      if (existing?.fingerprint === fingerprint) {
-        session = existing.session
+      const timer = setTimeout(() => {
+        timedOut = true
+        void session?.abort()
+        rejectDeadline?.(timeoutError())
+      }, timeoutMs)
+
+      let opened: Promise<TurnResult> | undefined
+      try {
+        const ready = await Promise.race([options.endpoint(), deadline])
+        if (stopped || input.signal?.aborted) {
+          return { kind: 'stopped' }
+        }
+        if (ready === null) {
+          return { kind: 'needs_login' }
+        }
+        opened = openTurn(ready)
+        const result = await Promise.race([opened, deadline])
+        if (stopped || input.signal?.aborted) {
+          return { kind: 'stopped' }
+        }
+        return result
+      } catch (reason: unknown) {
+        if (timedOut && session !== undefined) {
+          drop(slot)
+          session = undefined
+        }
+        return failed(reason, stopped || input.signal?.aborted === true)
+      } finally {
+        clearTimeout(timer)
+        input.signal?.removeEventListener('abort', onAbort)
+        void opened?.catch(() => undefined)
+      }
+
+      async function openTurn(endpoint: Endpoint): Promise<TurnResult> {
+        const fingerprint = `${endpoint.baseUrl}\n${endpoint.model}`
+        const existing = live.get(slot)
+        if (existing !== undefined && existing.fingerprint !== fingerprint) {
+          drop(slot)
+        }
+        const hit = live.get(slot)
+        if (hit !== undefined) {
+          session = hit.session
+          await session.prompt(input.ownerBody)
+          return { kind: 'ok', body: assistantText(session.messages) }
+        }
+        const created = await createSession(endpoint)
+        session = created
+        if (timedOut || stopped) {
+          void session.abort()
+          session.dispose()
+          session = undefined
+          throw stopped ? stoppedError() : timeoutError()
+        }
+        live.set(slot, { fingerprint, session })
+        if (input.prior.turns.length > 0) {
+          session.agent.state.messages = priorMessages(input.prior, endpoint.model)
+        }
         await session.prompt(input.ownerBody)
         return { kind: 'ok', body: assistantText(session.messages) }
       }
-      if (existing !== undefined) {
-        existing.session.dispose()
-        live.delete(slot)
+
+      async function createSession(endpoint: Endpoint): Promise<AgentSession> {
+        const module = await load()
+        const cwd = primeWorkDir(options.home, input.prior.botId)
+        const agentDir = dirname(primeCatalogPath(options.home))
+        const modelsPath = primeCatalogPath(options.home)
+        await mkdir(cwd, { recursive: true })
+        await writeCatalog(modelsPath, endpoint)
+        const authStorage = module.AuthStorage.create(join(agentDir, 'runtime-auth.json'))
+        authStorage.setRuntimeApiKey('cohort', endpoint.key)
+        const modelRegistry = module.ModelRegistry.create(authStorage, modelsPath)
+        const model =
+          modelRegistry.find('cohort', endpoint.model) ??
+          modelRegistry.getAll().find((item) => item.id === endpoint.model)
+        if (model === undefined) {
+          throw new Error('turn failed')
+        }
+        const settingsManager = module.SettingsManager.inMemory({
+          compaction: { enabled: false }
+        })
+        const resourceLoader = new module.DefaultResourceLoader({
+          cwd,
+          agentDir,
+          settingsManager,
+          noExtensions: true,
+          noSkills: true,
+          noPromptTemplates: true,
+          noThemes: true,
+          noContextFiles: true,
+          systemPrompt: botSystemPrompt(options.bot(input.prior.botId))
+        })
+        await resourceLoader.reload()
+        const created = await module.createAgentSession({
+          cwd,
+          agentDir,
+          authStorage,
+          modelRegistry,
+          model,
+          thinkingLevel: 'minimal',
+          tools: ['ipython'],
+          includeGoals: false,
+          resourceLoader,
+          sessionManager: module.SessionManager.inMemory(cwd),
+          settingsManager
+        })
+        return created.session
       }
-      const module = await load()
-      const cwd = primeWorkDir(options.home, input.prior.botId)
-      const agentDir = dirname(primeCatalogPath(options.home))
-      const modelsPath = primeCatalogPath(options.home)
-      await mkdir(cwd, { recursive: true })
-      await writeCatalog(modelsPath, endpoint)
-      const authStorage = module.AuthStorage.create(join(agentDir, 'runtime-auth.json'))
-      authStorage.setRuntimeApiKey('cohort', endpoint.key)
-      const modelRegistry = module.ModelRegistry.create(authStorage, modelsPath)
-      const model =
-        modelRegistry.find('cohort', endpoint.model) ??
-        modelRegistry.getAll().find((item) => item.id === endpoint.model)
-      if (model === undefined) {
-        return { kind: 'turn_failed', detail: 'turn failed' }
-      }
-      const settingsManager = module.SettingsManager.inMemory({
-        compaction: { enabled: false }
-      })
-      const resourceLoader = new module.DefaultResourceLoader({
-        cwd,
-        agentDir,
-        settingsManager,
-        noExtensions: true,
-        noSkills: true,
-        noPromptTemplates: true,
-        noThemes: true,
-        noContextFiles: true,
-        systemPrompt: botSystemPrompt(options.bot(input.prior.botId))
-      })
-      await resourceLoader.reload()
-      const created = await module.createAgentSession({
-        cwd,
-        agentDir,
-        authStorage,
-        modelRegistry,
-        model,
-        thinkingLevel: 'minimal',
-        tools: ['ipython'],
-        includeGoals: false,
-        resourceLoader,
-        sessionManager: module.SessionManager.inMemory(cwd),
-        settingsManager
-      })
-      session = created.session
-      if (timedOut || stopped) {
-        void session.abort()
-        session.dispose()
-        session = undefined
-        throw stopped ? stoppedError() : timeoutError()
-      }
-      live.set(slot, { fingerprint, session })
-      if (input.prior.turns.length > 0) {
-        session.agent.state.messages = priorMessages(input.prior, endpoint.model)
-      }
-      await session.prompt(input.ownerBody)
-      return { kind: 'ok', body: assistantText(session.messages) }
     }
   }
 
-  return Object.assign(run, { close })
+  return { turn: bind('dm'), roomTurn: bind('room'), close }
 }
