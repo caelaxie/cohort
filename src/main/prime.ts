@@ -260,6 +260,22 @@ export function primeTurn(options: {
         const authStorage = module.AuthStorage.create(join(agentDir, 'runtime-auth.json'))
         authStorage.setRuntimeApiKey('cohort', endpoint.key)
         const modelRegistry = module.ModelRegistry.create(authStorage, modelsPath)
+        modelRegistry.registerProvider('cohort', {
+          baseUrl: endpoint.baseUrl,
+          api: 'openai-completions',
+          apiKey: endpoint.key,
+          models: [
+            {
+              id: endpoint.model,
+              name: endpoint.model,
+              reasoning: true,
+              input: ['text'],
+              contextWindow: 128_000,
+              maxTokens: 8192,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+            }
+          ]
+        })
         const model =
           modelRegistry.find('cohort', endpoint.model) ??
           modelRegistry.getAll().find((item) => item.id === endpoint.model)

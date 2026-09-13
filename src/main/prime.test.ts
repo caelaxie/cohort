@@ -130,11 +130,20 @@ function fakeModule(options?: {
       })
     },
     ModelRegistry: {
-      create: () => ({
-        getAll: () => [{ id: 'mock-hatch', provider: 'cohort' }],
-        find: (_provider: string, id: string) =>
-          id === 'mock-hatch' ? { id: 'mock-hatch', provider: 'cohort' } : undefined
-      })
+      create: () => {
+        let registered = false
+        return {
+          registerProvider: () => {
+            registered = true
+          },
+          getAll: () =>
+            registered ? [{ id: 'mock-hatch', provider: 'cohort' }] : [],
+          find: (_provider: string, id: string) =>
+            registered && id === 'mock-hatch'
+              ? { id: 'mock-hatch', provider: 'cohort' }
+              : undefined
+        }
+      }
     },
     SessionManager: {
       inMemory: (cwd?: string) => ({ cwd })
@@ -605,6 +614,7 @@ describe('prime kernel contract', () => {
     expect(source.includes("noTools: 'all'")).toBe(false)
     expect(source.includes('Object.assign')).toBe(false)
     expect(source.includes('roomTurn')).toBe(true)
+    expect(source.includes('registerProvider')).toBe(true)
     expect(source.includes('assistantText(session.messages)')).toBe(true)
     expect(source.includes('streamedText')).toBe(false)
     expect(source.includes('.subscribe(')).toBe(false)
