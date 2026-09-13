@@ -6,7 +6,7 @@ topic: hatch-grok-bot-alternative
 
 # Cohort - Plan
 
-This file is archived history. It is not a run queue. Live requirements are in `ROADMAP.md`.
+This file is archived history. It is not a run queue.
 
 ## Goal Capsule
 
