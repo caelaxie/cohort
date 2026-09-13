@@ -9,6 +9,7 @@ This directory is the maintained source for verifying the user-facing behavior o
 - `$RUN_ROOT` is under `$TMPDIR/cohort-verify/`. Never use the user's real `~/.cohort`.
 - Chief exists. No workspace exists.
 - Never drive an instance this verification run did not start.
+- Recipes that send, assign, or room-send connect local Ollama per `../SKILL.md` **Model provider**. Do not use a mock completions server.
 
 ## Driving conventions
 

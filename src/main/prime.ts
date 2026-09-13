@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import type { AgentSession } from '@earendil-works/pi-coding-agent'
+import type { AgentSession } from 'prime-agent'
 import type { Bot, BotId } from '../shared/roster'
 import type { Thread } from '../shared/talk'
 import { botSystemPrompt } from './chief-prompt'
@@ -10,7 +10,12 @@ import type { Turn, TurnResult } from './turn'
 
 type PrimeMessage = AgentSession['messages'][number]
 
-export type PrimeModule = typeof import('@earendil-works/pi-coding-agent')
+export type PrimeModule = typeof import('prime-agent')
+
+type LiveSession = {
+  readonly fingerprint: string
+  readonly session: AgentSession
+}
 
 const TURN_MS = 60_000
 
@@ -129,10 +134,16 @@ async function writeCatalog(modelsPath: string, endpoint: Endpoint): Promise<voi
   await writeFile(modelsPath, `${JSON.stringify(models, null, 2)}\n`, 'utf8')
 }
 
-const defaultLoad = (): Promise<PrimeModule> => import('@earendil-works/pi-coding-agent')
+const defaultLoad = (): Promise<PrimeModule> => import('prime-agent')
 
 export function primeCatalogPath(home: string): string {
   return join(home, 'prime', 'agent', 'models.json')
+}
+
+export type PrimeKernel = {
+  readonly turn: Turn
+  readonly roomTurn: Turn
+  close(): void
 }
 
 export function primeTurn(options: {
@@ -141,118 +152,168 @@ export function primeTurn(options: {
   readonly bot: (id: BotId) => Bot
   readonly load?: () => Promise<PrimeModule>
   readonly timeoutMs?: number
-}): Turn {
+}): PrimeKernel {
   const load = options.load ?? defaultLoad
   const timeoutMs = options.timeoutMs ?? TURN_MS
+  const live = new Map<string, LiveSession>()
 
-  return async (input) => {
-    let session: AgentSession | undefined
-    let timedOut = false
-    let stopped = false
-    let rejectDeadline: ((reason: Error) => void) | undefined
-    const deadline = new Promise<never>((_, reject) => {
-      rejectDeadline = reject
-    })
-    const onAbort = (): void => {
-      stopped = true
-      void session?.abort()
-      rejectDeadline?.(stoppedError())
-    }
-    input.signal?.addEventListener('abort', onAbort, { once: true })
-    if (input.signal?.aborted) {
-      input.signal.removeEventListener('abort', onAbort)
-      return { kind: 'stopped' }
-    }
+  const drop = (slot: string): void => {
+    const item = live.get(slot)
+    if (item === undefined) return
+    item.session.dispose()
+    live.delete(slot)
+  }
 
-    const timer = setTimeout(() => {
-      timedOut = true
-      void session?.abort()
-      rejectDeadline?.(timeoutError())
-    }, timeoutMs)
+  const close = (): void => {
+    for (const slot of [...live.keys()]) drop(slot)
+  }
 
-    let opened: Promise<TurnResult> | undefined
-    try {
-      const ready = await Promise.race([options.endpoint(), deadline])
-      if (stopped || input.signal?.aborted) {
+  const bind = (channel: 'dm' | 'room'): Turn => {
+    return async (input) => {
+      const slot = `${channel}:${input.prior.botId}`
+      let session: AgentSession | undefined
+      let timedOut = false
+      let stopped = false
+      let rejectDeadline: ((reason: Error) => void) | undefined
+      const deadline = new Promise<never>((_, reject) => {
+        rejectDeadline = reject
+      })
+      const onAbort = (): void => {
+        stopped = true
+        void session?.abort()
+        rejectDeadline?.(stoppedError())
+      }
+      input.signal?.addEventListener('abort', onAbort, { once: true })
+      if (input.signal?.aborted) {
+        input.signal.removeEventListener('abort', onAbort)
         return { kind: 'stopped' }
       }
-      if (ready === null) {
-        return { kind: 'needs_login' }
-      }
-      opened = openTurn(ready)
-      const result = await Promise.race([opened, deadline])
-      if (stopped || input.signal?.aborted) {
-        return { kind: 'stopped' }
-      }
-      return result
-    } catch (reason: unknown) {
-      return failed(reason, stopped || input.signal?.aborted === true)
-    } finally {
-      clearTimeout(timer)
-      input.signal?.removeEventListener('abort', onAbort)
-      session?.dispose()
-      void opened?.catch(() => undefined)
-    }
 
-    async function openTurn(endpoint: Endpoint): Promise<TurnResult> {
-      const module = await load()
-      const cwd = primeWorkDir(options.home, input.prior.botId)
-      const agentDir = dirname(primeCatalogPath(options.home))
-      const modelsPath = primeCatalogPath(options.home)
-      await mkdir(cwd, { recursive: true })
-      await writeCatalog(modelsPath, endpoint)
-      const modelRuntime = await module.ModelRuntime.create({
-        authPath: join(agentDir, 'runtime-auth.json'),
-        modelsPath,
-        refreshOnCreate: false,
-        allowModelNetwork: false
-      })
-      await modelRuntime.setRuntimeApiKey('cohort', endpoint.key)
-      const model =
-        modelRuntime.getModel('cohort', endpoint.model) ??
-        modelRuntime.getModels().find((item) => item.id === endpoint.model)
-      if (model === undefined) {
-        return { kind: 'turn_failed', detail: 'turn failed' }
+      const timer = setTimeout(() => {
+        timedOut = true
+        void session?.abort()
+        rejectDeadline?.(timeoutError())
+      }, timeoutMs)
+
+      let opened: Promise<TurnResult> | undefined
+      try {
+        const ready = await Promise.race([options.endpoint(), deadline])
+        if (stopped || input.signal?.aborted) {
+          return { kind: 'stopped' }
+        }
+        if (ready === null) {
+          return { kind: 'needs_login' }
+        }
+        opened = openTurn(ready)
+        const result = await Promise.race([opened, deadline])
+        if (stopped || input.signal?.aborted) {
+          return { kind: 'stopped' }
+        }
+        return result
+      } catch (reason: unknown) {
+        if (timedOut && session !== undefined) {
+          drop(slot)
+          session = undefined
+        }
+        return failed(reason, stopped || input.signal?.aborted === true)
+      } finally {
+        clearTimeout(timer)
+        input.signal?.removeEventListener('abort', onAbort)
+        void opened?.catch(() => undefined)
       }
-      const settingsManager = module.SettingsManager.inMemory({
-        compaction: { enabled: false },
-        defaultTools: []
-      })
-      const resourceLoader = new module.DefaultResourceLoader({
-        cwd,
-        agentDir,
-        settingsManager,
-        noExtensions: true,
-        noSkills: true,
-        noPromptTemplates: true,
-        noThemes: true,
-        noContextFiles: true,
-        systemPrompt: botSystemPrompt(options.bot(input.prior.botId))
-      })
-      await resourceLoader.reload()
-      const created = await module.createAgentSession({
-        cwd,
-        agentDir,
-        modelRuntime,
-        model,
-        thinkingLevel: 'minimal',
-        noTools: 'all',
-        resourceLoader,
-        sessionManager: module.SessionManager.inMemory(cwd),
-        settingsManager
-      })
-      session = created.session
-      if (timedOut || stopped) {
-        void session.abort()
-        session.dispose()
-        session = undefined
-        throw stopped ? stoppedError() : timeoutError()
+
+      async function openTurn(endpoint: Endpoint): Promise<TurnResult> {
+        const fingerprint = `${endpoint.baseUrl}\n${endpoint.model}`
+        const existing = live.get(slot)
+        if (existing !== undefined && existing.fingerprint !== fingerprint) {
+          drop(slot)
+        }
+        const hit = live.get(slot)
+        if (hit !== undefined) {
+          session = hit.session
+          await session.prompt(input.ownerBody)
+          return { kind: 'ok', body: assistantText(session.messages) }
+        }
+        const created = await createSession(endpoint)
+        session = created
+        if (timedOut || stopped) {
+          void session.abort()
+          session.dispose()
+          session = undefined
+          throw stopped ? stoppedError() : timeoutError()
+        }
+        live.set(slot, { fingerprint, session })
+        if (input.prior.turns.length > 0) {
+          session.agent.state.messages = priorMessages(input.prior, endpoint.model)
+        }
+        await session.prompt(input.ownerBody)
+        return { kind: 'ok', body: assistantText(session.messages) }
       }
-      if (input.prior.turns.length > 0) {
-        session.agent.state.messages = priorMessages(input.prior, endpoint.model)
+
+      async function createSession(endpoint: Endpoint): Promise<AgentSession> {
+        const module = await load()
+        const cwd = primeWorkDir(options.home, input.prior.botId)
+        const agentDir = dirname(primeCatalogPath(options.home))
+        const modelsPath = primeCatalogPath(options.home)
+        await mkdir(cwd, { recursive: true })
+        await writeCatalog(modelsPath, endpoint)
+        const authStorage = module.AuthStorage.create(join(agentDir, 'runtime-auth.json'))
+        authStorage.setRuntimeApiKey('cohort', endpoint.key)
+        const modelRegistry = module.ModelRegistry.create(authStorage, modelsPath)
+        modelRegistry.registerProvider('cohort', {
+          baseUrl: endpoint.baseUrl,
+          api: 'openai-completions',
+          apiKey: endpoint.key,
+          models: [
+            {
+              id: endpoint.model,
+              name: endpoint.model,
+              reasoning: true,
+              input: ['text'],
+              contextWindow: 128_000,
+              maxTokens: 8192,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+            }
+          ]
+        })
+        const model =
+          modelRegistry.find('cohort', endpoint.model) ??
+          modelRegistry.getAll().find((item) => item.id === endpoint.model)
+        if (model === undefined) {
+          throw new Error('turn failed')
+        }
+        const settingsManager = module.SettingsManager.inMemory({
+          compaction: { enabled: false }
+        })
+        const resourceLoader = new module.DefaultResourceLoader({
+          cwd,
+          agentDir,
+          settingsManager,
+          noExtensions: true,
+          noSkills: true,
+          noPromptTemplates: true,
+          noThemes: true,
+          noContextFiles: true,
+          systemPrompt: botSystemPrompt(options.bot(input.prior.botId))
+        })
+        await resourceLoader.reload()
+        const created = await module.createAgentSession({
+          cwd,
+          agentDir,
+          authStorage,
+          modelRegistry,
+          model,
+          thinkingLevel: 'minimal',
+          tools: ['ipython'],
+          includeGoals: false,
+          resourceLoader,
+          sessionManager: module.SessionManager.inMemory(cwd),
+          settingsManager
+        })
+        return created.session
       }
-      await session.prompt(input.ownerBody)
-      return { kind: 'ok', body: assistantText(session.messages) }
     }
   }
+
+  return { turn: bind('dm'), roomTurn: bind('room'), close }
 }

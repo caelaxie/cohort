@@ -19,20 +19,22 @@ export function registerIpc(home: string): { quit: () => Promise<void> } {
     env: process.env,
     primeAuthPath: primeAuthPath(home)
   })
+  const prime = primeTurn({
+    home,
+    endpoint: () => kernel.endpoint(),
+    bot: (id) => {
+      const found = store.bot(id)
+      if (!found) {
+        throw new Error('unknown bot')
+      }
+      return found
+    }
+  })
   const talk = new TalkStore({
     home,
     known: (id) => store.known(id),
-    turn: primeTurn({
-      home,
-      endpoint: () => kernel.endpoint(),
-      bot: (id) => {
-        const found = store.bot(id)
-        if (!found) {
-          throw new Error('unknown bot')
-        }
-        return found
-      }
-    })
+    turn: prime.turn,
+    roomTurn: prime.roomTurn
   })
   const approvals = new ApprovalStore({
     home,
@@ -67,6 +69,7 @@ export function registerIpc(home: string): { quit: () => Promise<void> } {
     quit: async () => {
       computer.stop()
       talk.close()
+      prime.close()
       approvals.close()
       store.close()
     }

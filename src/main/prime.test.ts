@@ -122,15 +122,28 @@ function fakeModule(options?: {
         }
       }
     },
-    ModelRuntime: {
-      create: async () => ({
-        getModels: () => [{ id: 'mock-hatch', provider: 'cohort' }],
-        getModel: (_provider: string, id: string) =>
-          id === 'mock-hatch' ? { id: 'mock-hatch', provider: 'cohort' } : undefined,
-        setRuntimeApiKey: async (provider: string, key: string) => {
+    AuthStorage: {
+      create: () => ({
+        setRuntimeApiKey: (provider: string, key: string) => {
           keys.push(`${provider}:${key}`)
         }
       })
+    },
+    ModelRegistry: {
+      create: () => {
+        let registered = false
+        return {
+          registerProvider: () => {
+            registered = true
+          },
+          getAll: () =>
+            registered ? [{ id: 'mock-hatch', provider: 'cohort' }] : [],
+          find: (_provider: string, id: string) =>
+            registered && id === 'mock-hatch'
+              ? { id: 'mock-hatch', provider: 'cohort' }
+              : undefined
+        }
+      }
     },
     SessionManager: {
       inMemory: (cwd?: string) => ({ cwd })
@@ -197,14 +210,14 @@ describe('primeTurn', () => {
   it('prompts Prime and returns the assistant reply', async () => {
     const home = tempHome()
     const fake = fakeModule()
-    const turn = primeTurn({
+    const prime = primeTurn({
       bot: () => CHIEF,
       home,
       endpoint: async () => endpoint,
       load: async () => fake.module
     })
     expect(
-      await turn({
+      await prime.turn({
         prior: emptyPrior,
         ownerBody: 'hello'
       })
@@ -218,14 +231,14 @@ describe('primeTurn', () => {
   it('uses the hatched bot name in the system prompt', async () => {
     const scout = parseTeammate({ id: 'scout', name: 'Scout' })
     const fake = fakeModule({ reply: 'hi from Scout' })
-    const turn = primeTurn({
+    const prime = primeTurn({
       bot: (id) => (id === scout.id ? scout : CHIEF),
       home: tempHome(),
       endpoint: async () => endpoint,
       load: async () => fake.module
     })
     expect(
-      await turn({
+      await prime.turn({
         prior: { botId: scout.id, turns: [] },
         ownerBody: 'hello'
       })
@@ -237,13 +250,13 @@ describe('primeTurn', () => {
 
   it('seeds prior turns into the session before the new prompt', async () => {
     const { module, prompts, seeded } = fakeModule()
-    const turn = primeTurn({
+    const prime = primeTurn({
       bot: () => CHIEF,
       home: tempHome(),
       endpoint: async () => endpoint,
       load: async () => module
     })
-    await turn({
+    await prime.turn({
       prior: {
         botId: 'chief',
         turns: [
@@ -267,7 +280,7 @@ describe('primeTurn', () => {
 
   it('returns needs_login and does not load Prime', async () => {
     let loaded = false
-    const turn = primeTurn({
+    const prime = primeTurn({
       bot: () => CHIEF,
       home: tempHome(),
       endpoint: async () => null,
@@ -276,24 +289,42 @@ describe('primeTurn', () => {
         return fakeModule().module
       }
     })
-    expect(await turn({ prior: emptyPrior, ownerBody: 'hello' })).toEqual({
+    expect(await prime.turn({ prior: emptyPrior, ownerBody: 'hello' })).toEqual({
       kind: 'needs_login'
     })
     expect(loaded).toBe(false)
   })
 
-  it('opens a one-shot session and disposes it after each turn', async () => {
+  it('reuses one live session across turns until close', async () => {
     const fake = fakeModule()
-    const turn = primeTurn({
+    const prime = primeTurn({
       bot: () => CHIEF,
       home: tempHome(),
       endpoint: async () => endpoint,
       load: async () => fake.module
     })
-    await turn({ prior: emptyPrior, ownerBody: 'one' })
-    await turn({ prior: emptyPrior, ownerBody: 'two' })
+    await prime.turn({ prior: emptyPrior, ownerBody: 'one' })
+    await prime.turn({ prior: emptyPrior, ownerBody: 'two' })
     expect(fake.prompts).toEqual(['one', 'two'])
+    expect(fake.opens).toBe(1)
+    expect(fake.disposed).toBe(0)
+    prime.close()
+    expect(fake.disposed).toBe(1)
+  })
+
+  it('keeps room and dm on separate live sessions', async () => {
+    const fake = fakeModule()
+    const prime = primeTurn({
+      bot: () => CHIEF,
+      home: tempHome(),
+      endpoint: async () => endpoint,
+      load: async () => fake.module
+    })
+    await prime.turn({ prior: emptyPrior, ownerBody: 'dm' })
+    await prime.roomTurn({ prior: emptyPrior, ownerBody: 'room' })
     expect(fake.opens).toBe(2)
+    expect(fake.prompts).toEqual(['dm', 'room'])
+    prime.close()
     expect(fake.disposed).toBe(2)
   })
 
@@ -308,13 +339,13 @@ describe('primeTurn', () => {
     )
     const before = readFileSync(authPath, 'utf8')
     const { module, keys } = fakeModule()
-    const turn = primeTurn({
+    const prime = primeTurn({
       bot: () => CHIEF,
       home,
       endpoint: async () => endpoint,
       load: async () => module
     })
-    await turn({ prior: emptyPrior, ownerBody: 'hello' })
+    await prime.turn({ prior: emptyPrior, ownerBody: 'hello' })
     expect(keys).toEqual(['cohort:sk-test'])
     expect(readFileSync(authPath, 'utf8')).toBe(before)
     const catalog = JSON.parse(readFileSync(primeCatalogPath(home), 'utf8')) as {
@@ -332,13 +363,13 @@ describe('primeTurn', () => {
         throw new Error('sk-test 401 from https://api.x.ai/v1')
       }
     })
-    const turn = primeTurn({
+    const prime = primeTurn({
       bot: () => CHIEF,
       home: tempHome(),
       endpoint: async () => endpoint,
       load: async () => module
     })
-    const result = await turn({ prior: emptyPrior, ownerBody: 'hello' })
+    const result = await prime.turn({ prior: emptyPrior, ownerBody: 'hello' })
     expect(result).toEqual({ kind: 'turn_failed', detail: 'turn failed' })
     expect(JSON.stringify(result).includes('sk-test')).toBe(false)
   })
@@ -353,13 +384,13 @@ describe('primeTurn', () => {
         errorMessage: 'sk-test provider boom'
       }
     })
-    const turn = primeTurn({
+    const prime = primeTurn({
       bot: () => CHIEF,
       home: tempHome(),
       endpoint: async () => endpoint,
       load: async () => fake.module
     })
-    const result = await turn({ prior: emptyPrior, ownerBody: 'hello' })
+    const result = await prime.turn({ prior: emptyPrior, ownerBody: 'hello' })
     expect(result).toEqual({ kind: 'turn_failed', detail: 'turn failed' })
     expect(JSON.stringify(result).includes('sk-test')).toBe(false)
     expect(JSON.stringify(result).includes('partial from stream')).toBe(false)
@@ -370,13 +401,13 @@ describe('primeTurn', () => {
     const { module } = fakeModule({
       prompt: async () => undefined
     })
-    const turn = primeTurn({
+    const prime = primeTurn({
       bot: () => CHIEF,
       home: tempHome(),
       endpoint: async () => endpoint,
       load: async () => module
     })
-    expect(await turn({ prior: emptyPrior, ownerBody: 'hello' })).toEqual({
+    expect(await prime.turn({ prior: emptyPrior, ownerBody: 'hello' })).toEqual({
       kind: 'turn_failed',
       detail: 'empty reply'
     })
@@ -390,14 +421,14 @@ describe('primeTurn', () => {
     const fake = fakeModule({
       create: () => held
     })
-    const turn = primeTurn({
+    const prime = primeTurn({
       bot: () => CHIEF,
       home: tempHome(),
       endpoint: async () => endpoint,
       load: async () => fake.module,
       timeoutMs: 20
     })
-    expect(await turn({ prior: emptyPrior, ownerBody: 'hello' })).toEqual({
+    expect(await prime.turn({ prior: emptyPrior, ownerBody: 'hello' })).toEqual({
       kind: 'turn_failed',
       detail: 'timeout'
     })
@@ -416,19 +447,19 @@ describe('primeTurn', () => {
           return
         })
     })
-    const turn = primeTurn({
+    const prime = primeTurn({
       bot: () => CHIEF,
       home: tempHome(),
       endpoint: async () => endpoint,
       load: async () => fake.module
     })
     const abort = new AbortController()
-    const pending = turn({ prior: emptyPrior, ownerBody: 'hello', signal: abort.signal })
+    const pending = prime.turn({ prior: emptyPrior, ownerBody: 'hello', signal: abort.signal })
     await expect.poll(() => fake.opens).toBe(1)
     abort.abort()
     expect(await pending).toEqual({ kind: 'stopped' })
     expect(fake.aborted).toBe(1)
-    expect(fake.disposed).toBe(1)
+    expect(fake.disposed).toBe(0)
   })
 
   it('abort during a delayed endpoint writes no talk row', async () => {
@@ -461,7 +492,7 @@ describe('primeTurn', () => {
           return endpoint
         },
         load: async () => fake.module
-      }),
+      }).turn,
       id: () => `m${++n}`,
       now: () => 1
     })
@@ -480,7 +511,7 @@ describe('primeTurn', () => {
     let loaded = false
     const abort = new AbortController()
     abort.abort()
-    const turn = primeTurn({
+    const prime = primeTurn({
       bot: () => CHIEF,
       home: tempHome(),
       endpoint: async () => endpoint,
@@ -489,7 +520,7 @@ describe('primeTurn', () => {
         return fakeModule().module
       }
     })
-    expect(await turn({ prior: emptyPrior, ownerBody: 'hello', signal: abort.signal })).toEqual({
+    expect(await prime.turn({ prior: emptyPrior, ownerBody: 'hello', signal: abort.signal })).toEqual({
       kind: 'stopped'
     })
     expect(loaded).toBe(false)
@@ -502,14 +533,14 @@ describe('primeTurn', () => {
           return
         })
     })
-    const turn = primeTurn({
+    const prime = primeTurn({
       bot: () => CHIEF,
       home: tempHome(),
       endpoint: async () => endpoint,
       load: async () => fake.module,
       timeoutMs: 20
     })
-    expect(await turn({ prior: emptyPrior, ownerBody: 'hello' })).toEqual({
+    expect(await prime.turn({ prior: emptyPrior, ownerBody: 'hello' })).toEqual({
       kind: 'turn_failed',
       detail: 'timeout'
     })
@@ -542,7 +573,7 @@ describe('primeTurn', () => {
         })
       })
       try {
-        const turn = primeTurn({
+        const prime = primeTurn({
           bot: () => CHIEF,
           home,
           endpoint: async () => ({
@@ -552,7 +583,7 @@ describe('primeTurn', () => {
           })
         })
         expect(
-          await turn({
+          await prime.turn({
             prior: emptyPrior,
             ownerBody: 'hello'
           })
@@ -578,7 +609,12 @@ describe('prime kernel contract', () => {
     expect(source.includes('as unknown as PrimeModule')).toBe(false)
     expect(source.includes('mergeCohortAuth')).toBe(false)
     expect(source.includes("apiKey: 'COHORT'")).toBe(false)
-    expect(source.includes("from '@earendil-works/pi-coding-agent'")).toBe(true)
+    expect(source.includes("from 'prime-agent'")).toBe(true)
+    expect(source.includes("tools: ['ipython']")).toBe(true)
+    expect(source.includes("noTools: 'all'")).toBe(false)
+    expect(source.includes('Object.assign')).toBe(false)
+    expect(source.includes('roomTurn')).toBe(true)
+    expect(source.includes('registerProvider')).toBe(true)
     expect(source.includes('assistantText(session.messages)')).toBe(true)
     expect(source.includes('streamedText')).toBe(false)
     expect(source.includes('.subscribe(')).toBe(false)

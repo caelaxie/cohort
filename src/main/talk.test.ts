@@ -413,7 +413,7 @@ describe('TalkStore', () => {
       }
     })
     expect(seen).toBe(
-      'You are Scout, a named teammate in Cohort, a crew of named AI teammates on this Mac. Reply as a teammate. Do not claim to have tools or a computer.'
+      'You are Scout, a named teammate in Cohort, a crew of named AI teammates on this Mac. Reply as a teammate. You have an IPython kernel. Do not claim to have a Mac computer.'
     )
     expect(sendCopy({ kind: 'busy' }, 'Scout')).toBe('Scout is still answering')
     expect(talk.thread('chief')).toEqual({ botId: 'chief', turns: [] })
@@ -686,8 +686,7 @@ describe('Chief coordination', () => {
     }
     expect(ipc.includes('cohort:approve')).toBe(true)
     expect(ipc.includes('cohort:request-approval')).toBe(true)
-    expect(prime.includes("noTools: 'all'")).toBe(true)
-    expect(prime.includes('defaultTools: []')).toBe(true)
+    expect(prime.includes("tools: ['ipython']")).toBe(true)
     expect(() => parseCoordination({ running: [], apiKey: 'sk' })).toThrow('secret field')
     expect(() => parseInterruptResult({ kind: 'ok', key: 'sk' })).toThrow('secret field')
     talk.close()
