@@ -10,4 +10,5 @@ export type Turn = (input: {
   readonly prior: Thread
   readonly ownerBody: string
   readonly signal?: AbortSignal
+  readonly channel?: 'dm' | 'room'
 }) => Promise<TurnResult>

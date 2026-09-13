@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import type { AgentSession } from '@earendil-works/pi-coding-agent'
+import type { AgentSession } from 'prime-agent'
 import type { Bot, BotId } from '../shared/roster'
 import type { Thread } from '../shared/talk'
 import { botSystemPrompt } from './chief-prompt'
@@ -10,7 +10,12 @@ import type { Turn, TurnResult } from './turn'
 
 type PrimeMessage = AgentSession['messages'][number]
 
-export type PrimeModule = typeof import('@earendil-works/pi-coding-agent')
+export type PrimeModule = typeof import('prime-agent')
+
+type LiveSession = {
+  readonly fingerprint: string
+  readonly session: AgentSession
+}
 
 const TURN_MS = 60_000
 
@@ -129,7 +134,7 @@ async function writeCatalog(modelsPath: string, endpoint: Endpoint): Promise<voi
   await writeFile(modelsPath, `${JSON.stringify(models, null, 2)}\n`, 'utf8')
 }
 
-const defaultLoad = (): Promise<PrimeModule> => import('@earendil-works/pi-coding-agent')
+const defaultLoad = (): Promise<PrimeModule> => import('prime-agent')
 
 export function primeCatalogPath(home: string): string {
   return join(home, 'prime', 'agent', 'models.json')
@@ -141,11 +146,21 @@ export function primeTurn(options: {
   readonly bot: (id: BotId) => Bot
   readonly load?: () => Promise<PrimeModule>
   readonly timeoutMs?: number
-}): Turn {
+}): Turn & { close(): void } {
   const load = options.load ?? defaultLoad
   const timeoutMs = options.timeoutMs ?? TURN_MS
+  const live = new Map<string, LiveSession>()
 
-  return async (input) => {
+  const close = (): void => {
+    for (const item of live.values()) {
+      item.session.dispose()
+    }
+    live.clear()
+  }
+
+  const run: Turn = async (input) => {
+    const channel = input.channel ?? 'dm'
+    const slot = `${channel}:${input.prior.botId}`
     let session: AgentSession | undefined
     let timedOut = false
     let stopped = false
@@ -186,37 +201,47 @@ export function primeTurn(options: {
       }
       return result
     } catch (reason: unknown) {
+      if (timedOut && session !== undefined) {
+        session.dispose()
+        live.delete(slot)
+        session = undefined
+      }
       return failed(reason, stopped || input.signal?.aborted === true)
     } finally {
       clearTimeout(timer)
       input.signal?.removeEventListener('abort', onAbort)
-      session?.dispose()
       void opened?.catch(() => undefined)
     }
 
     async function openTurn(endpoint: Endpoint): Promise<TurnResult> {
+      const fingerprint = `${endpoint.baseUrl}\n${endpoint.model}`
+      const existing = live.get(slot)
+      if (existing?.fingerprint === fingerprint) {
+        session = existing.session
+        await session.prompt(input.ownerBody)
+        return { kind: 'ok', body: assistantText(session.messages) }
+      }
+      if (existing !== undefined) {
+        existing.session.dispose()
+        live.delete(slot)
+      }
       const module = await load()
       const cwd = primeWorkDir(options.home, input.prior.botId)
       const agentDir = dirname(primeCatalogPath(options.home))
       const modelsPath = primeCatalogPath(options.home)
       await mkdir(cwd, { recursive: true })
       await writeCatalog(modelsPath, endpoint)
-      const modelRuntime = await module.ModelRuntime.create({
-        authPath: join(agentDir, 'runtime-auth.json'),
-        modelsPath,
-        refreshOnCreate: false,
-        allowModelNetwork: false
-      })
-      await modelRuntime.setRuntimeApiKey('cohort', endpoint.key)
+      const authStorage = module.AuthStorage.create(join(agentDir, 'runtime-auth.json'))
+      authStorage.setRuntimeApiKey('cohort', endpoint.key)
+      const modelRegistry = module.ModelRegistry.create(authStorage, modelsPath)
       const model =
-        modelRuntime.getModel('cohort', endpoint.model) ??
-        modelRuntime.getModels().find((item) => item.id === endpoint.model)
+        modelRegistry.find('cohort', endpoint.model) ??
+        modelRegistry.getAll().find((item) => item.id === endpoint.model)
       if (model === undefined) {
         return { kind: 'turn_failed', detail: 'turn failed' }
       }
       const settingsManager = module.SettingsManager.inMemory({
-        compaction: { enabled: false },
-        defaultTools: []
+        compaction: { enabled: false }
       })
       const resourceLoader = new module.DefaultResourceLoader({
         cwd,
@@ -233,10 +258,12 @@ export function primeTurn(options: {
       const created = await module.createAgentSession({
         cwd,
         agentDir,
-        modelRuntime,
+        authStorage,
+        modelRegistry,
         model,
         thinkingLevel: 'minimal',
-        noTools: 'all',
+        tools: ['ipython'],
+        includeGoals: false,
         resourceLoader,
         sessionManager: module.SessionManager.inMemory(cwd),
         settingsManager
@@ -248,6 +275,7 @@ export function primeTurn(options: {
         session = undefined
         throw stopped ? stoppedError() : timeoutError()
       }
+      live.set(slot, { fingerprint, session })
       if (input.prior.turns.length > 0) {
         session.agent.state.messages = priorMessages(input.prior, endpoint.model)
       }
@@ -255,4 +283,6 @@ export function primeTurn(options: {
       return { kind: 'ok', body: assistantText(session.messages) }
     }
   }
+
+  return Object.assign(run, { close })
 }

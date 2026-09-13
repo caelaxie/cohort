@@ -147,7 +147,8 @@ export class TalkStore {
       const result = await this.turn({
         prior: { botId: request.botId, turns: [] },
         ownerBody: roomTurnBody(prior, parsed.body),
-        signal: abort.signal
+        signal: abort.signal,
+        channel: 'room'
       })
       if (result.kind !== 'ok') {
         return result

@@ -7,8 +7,7 @@ Home is the named-bot roster with Chief as lead.
 
 ## Runtime
 
-v1 uses **Prime Agent**, embedded in the app. Do not use Deep Agents. Do not shell out to the Prime CLI as the kernel.
-A computer-use driver is the hands, not the kernel.
+v1 uses PrimeIntellect Prime Agent (`prime-agent`), embedded. The kernel tool is IPython. Do not use Deep Agents. Do not shell out to the Prime CLI as the kernel. A computer-use driver is still the hands, not the kernel.
 
 ## Working here
 

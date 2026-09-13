@@ -26,7 +26,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
-    "@earendil-works/pi-coding-agent": "^0.85.1",
+    "prime-agent": "https://github.com/PrimeIntellect-ai/prime-agent/releases/download/v0.9.4/prime-agent-0.9.4.tgz",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "better-sqlite3": "^13.0.3",

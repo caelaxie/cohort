@@ -122,14 +122,18 @@ function fakeModule(options?: {
         }
       }
     },
-    ModelRuntime: {
-      create: async () => ({
-        getModels: () => [{ id: 'mock-hatch', provider: 'cohort' }],
-        getModel: (_provider: string, id: string) =>
-          id === 'mock-hatch' ? { id: 'mock-hatch', provider: 'cohort' } : undefined,
-        setRuntimeApiKey: async (provider: string, key: string) => {
+    AuthStorage: {
+      create: () => ({
+        setRuntimeApiKey: (provider: string, key: string) => {
           keys.push(`${provider}:${key}`)
         }
+      })
+    },
+    ModelRegistry: {
+      create: () => ({
+        getAll: () => [{ id: 'mock-hatch', provider: 'cohort' }],
+        find: (_provider: string, id: string) =>
+          id === 'mock-hatch' ? { id: 'mock-hatch', provider: 'cohort' } : undefined
       })
     },
     SessionManager: {
@@ -282,7 +286,7 @@ describe('primeTurn', () => {
     expect(loaded).toBe(false)
   })
 
-  it('opens a one-shot session and disposes it after each turn', async () => {
+  it('reuses one live session across turns until close', async () => {
     const fake = fakeModule()
     const turn = primeTurn({
       bot: () => CHIEF,
@@ -293,8 +297,10 @@ describe('primeTurn', () => {
     await turn({ prior: emptyPrior, ownerBody: 'one' })
     await turn({ prior: emptyPrior, ownerBody: 'two' })
     expect(fake.prompts).toEqual(['one', 'two'])
-    expect(fake.opens).toBe(2)
-    expect(fake.disposed).toBe(2)
+    expect(fake.opens).toBe(1)
+    expect(fake.disposed).toBe(0)
+    turn.close()
+    expect(fake.disposed).toBe(1)
   })
 
   it('injects the runtime key and does not rewrite auth.json or a dummy apiKey', async () => {
@@ -428,7 +434,7 @@ describe('primeTurn', () => {
     abort.abort()
     expect(await pending).toEqual({ kind: 'stopped' })
     expect(fake.aborted).toBe(1)
-    expect(fake.disposed).toBe(1)
+    expect(fake.disposed).toBe(0)
   })
 
   it('abort during a delayed endpoint writes no talk row', async () => {
@@ -578,7 +584,9 @@ describe('prime kernel contract', () => {
     expect(source.includes('as unknown as PrimeModule')).toBe(false)
     expect(source.includes('mergeCohortAuth')).toBe(false)
     expect(source.includes("apiKey: 'COHORT'")).toBe(false)
-    expect(source.includes("from '@earendil-works/pi-coding-agent'")).toBe(true)
+    expect(source.includes("from 'prime-agent'")).toBe(true)
+    expect(source.includes("tools: ['ipython']")).toBe(true)
+    expect(source.includes("noTools: 'all'")).toBe(false)
     expect(source.includes('assistantText(session.messages)')).toBe(true)
     expect(source.includes('streamedText')).toBe(false)
     expect(source.includes('.subscribe(')).toBe(false)
