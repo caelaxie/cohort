@@ -21,11 +21,11 @@ Preconditions:
 
 - Baseline preconditions from `README.md` hold.
 - A teammate exists (run [Hatch a teammate](./hatch.md) `hatch-named`, then click Chief).
-- For a completed assign, launch with the same mock OpenAI-compatible server and `$RUN_ROOT/home/prime/agent/auth.json` setup as [Talk to Chief](./talk.md).
+- For a completed assign, connect local Ollama per `../SKILL.md` **Model provider**.
 
 - **Assign teammate.** After returning to Chief, `snapshot` shows `h1 "Chief"`, a To field, a Brief field, and an `Assign` button. Run `... fill --port $PORT --label "Brief" --value "draft the outline"`, then `... click --port $PORT --text "Assign"`.
 - **See running.** While the turn is in flight, `... wait --port $PORT --js "!!document.querySelector('[role=status]')"` and the status text includes Scout and `draft the outline`. Crew shows `working` on Scout. `... eval --port $PORT --js "window.cohort.coordination().then(c => JSON.stringify(c))"` includes `scout` and the brief. Chief's thread stays empty: `sqlite3 "$RUN_ROOT/home/talk.sqlite" "SELECT bot_id FROM turns WHERE bot_id = 'chief';"` is empty.
-- **Steer or finish.** After the mock reply, Scout's thread has the brief. `sqlite3 "$RUN_ROOT/home/talk.sqlite" "SELECT bot_id, owner_body FROM turns;"` includes `scout|draft the outline`. Assign again with a new brief to steer.
+- **Steer or finish.** After Scout's reply, that bot's thread has the brief. `sqlite3 "$RUN_ROOT/home/talk.sqlite" "SELECT bot_id, owner_body FROM turns;"` includes `scout|draft the outline`. Assign again with a new brief to steer. Wait `--timeout 120000` for the reply.
 - **Stop running.** Start an assign that stays in flight, then `... click --port $PORT --text "Stop"`. Status clears. That in-flight brief is not a turns row.
 - **Proof.** `... snapshot --port $PORT --path "$RUN_ROOT/evidence/coordinate/after.txt"` and `... screenshot --port $PORT --path "$RUN_ROOT/evidence/coordinate/after.png"`.
 

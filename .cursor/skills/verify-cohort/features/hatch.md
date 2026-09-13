@@ -20,12 +20,12 @@ Preconditions:
 
 - Baseline preconditions from `README.md` hold.
 - The scratch home has not been given a teammate row.
-- For `talk-as-hatched`, launch with the same mock OpenAI-compatible server and `$RUN_ROOT/home/prime/agent/auth.json` setup as [Talk to Chief](./talk.md).
+- For `talk-as-hatched`, connect local Ollama per `../SKILL.md` **Model provider** ([Talk to Chief](./talk.md) `send-reply` preconditions).
 
 - **Hatch named.** After `doctor`, run `node .cursor/skills/verify-cohort/scripts/cohort-drive.mjs snapshot --port $PORT`. The snapshot shows `h1 "Chief"`, a Name field, and a `Hatch` button. Run `... fill --port $PORT --label "Name" --value "Scout"`, then `... click --port $PORT --text "Hatch"`, then `... wait --port $PORT --js "document.querySelector('h1')?.textContent === 'Scout'"`.
 - **State.** `... state --port $PORT` has `current` of `scout` and `others` including `{ id: 'scout', name: 'Scout' }`. `sqlite3 "$RUN_ROOT/home/state.sqlite" "SELECT id, name FROM teammates;"` shows `scout|Scout`.
 - **Select hatched.** Run `... click --port $PORT --text "Chief"`, then `... click --port $PORT --text "Scout"`, then `... wait --port $PORT --js "document.querySelector('h1')?.textContent === 'Scout'"`. The pane shows a `Remove` button and a Message composer. It does not show Hatch.
-- **Talk as hatched.** With the mock server from Talk to Chief, run `... fill --port $PORT --label "Message" --value "hello"`, then `... click --port $PORT --text "Send"`, then `... wait --port $PORT --js "[...document.querySelectorAll('[data-speaker]')].map(el => el.getAttribute('data-speaker')+':'+el.querySelector('p')?.textContent).join('|') === 'owner:hello|bot:hi from Chief'"`. Speaker label for the bot line is Scout (`... eval --port $PORT --js "[...document.querySelectorAll('[data-speaker=\"bot\"] span')].map(el => el.textContent).join('') === 'Scout'"`). `sqlite3 "$RUN_ROOT/home/talk.sqlite" "SELECT bot_id, owner_body, bot_body FROM turns;"` is `scout|hello|hi from Chief`.
+- **Talk as hatched.** Run `... fill --port $PORT --label "Message" --value "Reply with only the word pong."`, then `... click --port $PORT --text "Send"`, then `... wait --port $PORT --timeout 120000 --js "[...document.querySelectorAll('[data-speaker=\"bot\"] p')].some(p => /pong/i.test(p.textContent||''))"`. Speaker label for the bot line is Scout (`... eval --port $PORT --js "[...document.querySelectorAll('[data-speaker=\"bot\"] span')].map(el => el.textContent).join('') === 'Scout'"`). `sqlite3 "$RUN_ROOT/home/talk.sqlite" "SELECT bot_id, owner_body FROM turns;"` includes `scout|Reply with only the word pong.`.
 - **Remove hatched.** Run `... click --port $PORT --text "Remove"`, then `... wait --port $PORT --js "document.querySelector('h1')?.textContent === 'Chief'"`. `... state --port $PORT` has `current` of `chief` and `others` of `[]`. `sqlite3 "$RUN_ROOT/home/state.sqlite" "SELECT id FROM teammates;"` is empty.
 - **Proof.** `... snapshot --port $PORT --path "$RUN_ROOT/evidence/hatch/after.txt"` and `... screenshot --port $PORT --path "$RUN_ROOT/evidence/hatch/after.png"`.
 
@@ -34,5 +34,5 @@ Preconditions:
 - Hatch is on the Chief pane, not the Crew sidebar. Click Chief before looking for the Name field.
 - After a teammate exists, Chief also shows To / Brief / Assign. That is coordination, not hatch.
 - Hatch does not need a connected model. Talk as the hatched bot does.
-- The mock reply body may still say `hi from Chief` if the server is the Talk to Chief fixture. Assert `bot_id` and the Scout speaker label, not the mock wording.
+- Assert `bot_id` and the Scout speaker label. Do not require a fixed reply string beyond `pong`.
 - `fill --label` needs Name inside a `<label>` that wraps the input.

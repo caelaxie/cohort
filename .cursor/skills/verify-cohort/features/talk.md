@@ -20,18 +20,19 @@ Preconditions:
 
 - Baseline preconditions from `README.md` hold.
 - Launch with `XAI_API_KEY`, `OPENAI_API_KEY`, and `ANTHROPIC_API_KEY` unset.
-- A mock OpenAI-compatible server is listening and `$RUN_ROOT/home/prime/agent/auth.json` contains `openai-completions` pointing at that server (`baseUrl`, `model`, `key`). Chief's reply is produced by embedded Prime Agent using that same file.
+- For `send-reply`, connect local Ollama first (`../SKILL.md` **Model provider**, [Model settings](./model-settings.md) `paste-connect`), then click `Chief`.
 
 - **Composer.** After `doctor`, run `node .cursor/skills/verify-cohort/scripts/cohort-drive.mjs snapshot --port $PORT`. The snapshot shows `h1 "Chief"`, a Message field, and a `Send` button. It does not show `Add files` or a `Files` rail.
 - **Needs login without a key.** If auth.json is missing, the Chief pane includes `Connect a model in Settings`. Send stays disabled until Connect succeeds.
-- **Send reply.** Run `... fill --port $PORT --label "Message" --value "hello"`, then `... click --port $PORT --text "Send"`, then `... wait --port $PORT --js "[...document.querySelectorAll('[data-speaker]')].map(el => el.getAttribute('data-speaker')+':'+el.querySelector('p')?.textContent).join('|') === 'owner:hello|bot:hi from Chief'"`. The pane shows You / hello and Chief / hi from Chief.
-- **State.** `... state --port $PORT` still has `current` of `chief`. `sqlite3 "$RUN_ROOT/home/talk.sqlite" "SELECT owner_body, bot_body FROM turns ORDER BY created_at, owner_id;"` shows `hello|hi from Chief`.
-- **Reopen.** Tear down the instance per `../SKILL.md` cleanup but keep `$RUN_ROOT/home`. Relaunch with the same `COHORT_HOME`. After `doctor`, the Chief pane still shows hello and hi from Chief.
+- **Send enabled.** After Connect and returning to Chief, `... wait --port $PORT --js "[...document.querySelectorAll('button')].some(b => b.textContent==='Send' && !b.disabled)"`.
+- **Send reply.** Run `... fill --port $PORT --label "Message" --value "Reply with only the word pong."`, then `... click --port $PORT --text "Send"`, then `... wait --port $PORT --timeout 120000 --js "[...document.querySelectorAll('[data-speaker=\"bot\"] p')].some(p => /pong/i.test(p.textContent||''))"`. The pane shows You / that prompt and Chief / a reply containing `pong`. If the wait fails, `eval` `document.querySelector('p[role="alert"]')?.textContent` and screenshot. `turn failed` is a kernel miss, not a slow model.
+- **State.** `... state --port $PORT` still has `current` of `chief`. `sqlite3 "$RUN_ROOT/home/talk.sqlite" "SELECT owner_body, bot_body FROM turns ORDER BY created_at, owner_id;"` has owner `Reply with only the word pong.` and a bot body that contains `pong`.
+- **Reopen.** Tear down the instance per `../SKILL.md` cleanup but keep `$RUN_ROOT/home`. Relaunch with the same `COHORT_HOME`. After `doctor`, the Chief pane still shows that turn.
 - **Proof.** `... snapshot --port $PORT --path "$RUN_ROOT/evidence/talk/after.txt"` and `... screenshot --port $PORT --path "$RUN_ROOT/evidence/talk/after.png"`.
 
 ## Gotchas
 
 - `fill --label` needs Message inside a `<label>` that wraps the textarea.
-- Seed `$RUN_ROOT/home/prime/agent/auth.json`, not `~/.prime/agent/auth.json`.
-- The mock server must answer `POST /chat/completions` as an OpenAI SSE stream (`text/event-stream` with `finish_reason`). Prime Agent does not accept a single JSON body.
+- Connect through Settings. Do not seed `auth.json`. Do not start a mock completions server.
+- The owner's `~/.prime/agent/auth.json` is not the scratch file.
 - Bot roster `empty-thread` now expects a composer. Absence of a textarea is a regression.

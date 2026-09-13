@@ -1,6 +1,6 @@
 ---
 name: verify-cohort
-description: Drive the real Cohort desktop app (Electron + React) to prove user-facing behavior. Launch an isolated instance, exercise features over CDP, capture evidence. Use when a change touches the main process, preload, renderer UI, or the named-bot roster.
+description: Drive the real Cohort desktop app (Electron + React) to prove user-facing behavior. Launch an isolated instance, connect local Ollama qwen3.8:27b-mlx, exercise features over CDP, capture evidence. Use when a change touches the main process, preload, renderer UI, or the named-bot roster.
 ---
 
 # Verify Cohort
@@ -14,6 +14,7 @@ This skill launches a throwaway instance, drives it over the Chrome DevTools Pro
 - Repo deps installed: `pnpm install` (postinstall rebuilds better-sqlite3 for Electron).
 - Node 22+ on PATH for the helper (uses global `fetch`/`WebSocket`).
 - Helper: `scripts/cohort-drive.mjs` relative to this skill directory. Run it as `node .cursor/skills/verify-cohort/scripts/cohort-drive.mjs <command>` from the repo root.
+- Local Ollama is the LLM for every recipe that sends, assigns, or room-sends. See **Model provider**.
 
 ## Launch
 
@@ -39,6 +40,20 @@ echo "$RUN_ROOT $PORT"
 - A real window opens on screen. That is expected; cleanup closes it.
 - `pnpm dev` watches sources and restarts the main process on edits. Do not edit `src/` while an instance is up.
 - Record `RUN_ROOT` and `PORT`; every later step needs them.
+
+## Model provider
+
+Do not start a mock completions server. Do not seed `$RUN_ROOT/home/prime/agent/auth.json` by hand.
+
+Connect through Settings (`features/model-settings.md` `paste-connect`) with:
+
+- Base URL: `http://127.0.0.1:11434/v1`
+- Model: `qwen3.8:27b-mlx`
+- API key: `ollama` (Connect requires a non-empty secret. Ollama does not check it.)
+
+Before launch, `curl -sS --max-time 3 http://127.0.0.1:11434/api/tags` must list `qwen3.8:27b-mlx`. If it does not, stop. Do not pick another model.
+
+Turns against this model often take more than 15 s. `wait` for a bot reply uses `--timeout 120000`.
 
 ## Doctor
 
@@ -82,7 +97,7 @@ Stable handles in this repo (prefer these over CSS position):
 - Current bot: sidebar button with `aria-current="page"`; main header is the `h1`.
 - Chief row: button whose trimmed text is `Chief`.
 - Settings footer: button whose trimmed text is `Settings`. The Settings pane `h1` is `Settings`.
-- Errors render in `p[role="alert"]`.
+- Errors render in `p[role="alert"]`. `snapshot` may omit that node. After a failed Send, `eval` `document.querySelector('p[role="alert"]')?.textContent` and take a screenshot.
 
 Feature-by-feature recipes live in `features/`. Read `features/README.md` before driving.
 
