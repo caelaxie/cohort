@@ -12,7 +12,6 @@ A computer-use driver is the hands, not the kernel.
 
 ## Working here
 
-- `docs/archive` is history, not a run queue.
 - Do not add users, cloud, or a knowledge base while v1 is open.
 - Owners bring their own model subscriptions (kernel `auth.json`). Do not add a Cohort weekly cap or treat Cohort as a model vendor.
 - Workspace folders, add-files, and Boxlite `/workspace` are leftover. Do not extend them.
