@@ -136,12 +136,9 @@ function fakeModule(options?: {
           registerProvider: () => {
             registered = true
           },
-          getAll: () =>
-            registered ? [{ id: 'mock-hatch', provider: 'cohort' }] : [],
+          getAll: () => (registered ? [{ id: 'mock-hatch', provider: 'cohort' }] : []),
           find: (_provider: string, id: string) =>
-            registered && id === 'mock-hatch'
-              ? { id: 'mock-hatch', provider: 'cohort' }
-              : undefined
+            registered && id === 'mock-hatch' ? { id: 'mock-hatch', provider: 'cohort' } : undefined
         }
       }
     },
@@ -520,7 +517,9 @@ describe('primeTurn', () => {
         return fakeModule().module
       }
     })
-    expect(await prime.turn({ prior: emptyPrior, ownerBody: 'hello', signal: abort.signal })).toEqual({
+    expect(
+      await prime.turn({ prior: emptyPrior, ownerBody: 'hello', signal: abort.signal })
+    ).toEqual({
       kind: 'stopped'
     })
     expect(loaded).toBe(false)
