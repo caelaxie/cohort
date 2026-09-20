@@ -23,6 +23,7 @@ import type { Turn } from './turn'
 export type TalkOptions = {
   readonly home: string
   readonly turn: Turn
+  readonly roomTurn?: Turn
   readonly known: (id: BotId) => boolean
   readonly now?: () => number
   readonly id?: () => string
@@ -46,6 +47,7 @@ function toClosedTurn(row: typeof turns.$inferSelect): ClosedTurn {
 export class TalkStore {
   private readonly db: TalkDb
   private readonly turn: Turn
+  private readonly roomTurn: Turn
   private readonly known: (id: BotId) => boolean
   private readonly now: () => number
   private readonly id: () => string
@@ -58,6 +60,7 @@ export class TalkStore {
   constructor(options: TalkOptions) {
     this.db = openTalkDb(options.home)
     this.turn = options.turn
+    this.roomTurn = options.roomTurn ?? options.turn
     this.known = options.known
     this.now = options.now ?? Date.now
     this.id = options.id ?? randomUUID
@@ -144,7 +147,7 @@ export class TalkStore {
     this.inflight.set(request.botId, { brief: parsed.body, abort })
     try {
       const prior = this.readRoomLines()
-      const result = await this.turn({
+      const result = await this.roomTurn({
         prior: { botId: request.botId, turns: [] },
         ownerBody: roomTurnBody(prior, parsed.body),
         signal: abort.signal

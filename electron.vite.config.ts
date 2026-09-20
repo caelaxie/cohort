@@ -7,7 +7,7 @@ export default defineConfig({
   main: {
     build: {
       rollupOptions: {
-        external: ['@earendil-works/pi-coding-agent']
+        external: ['prime-agent']
       }
     }
   },
